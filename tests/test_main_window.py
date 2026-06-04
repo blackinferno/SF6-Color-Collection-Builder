@@ -3,6 +3,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QMessageBox
 
@@ -10,6 +11,7 @@ from app.characters import CHARACTER_NAMES
 from app.settings import APP_VERSION
 from app.scanner import scan_zip
 from app.scanner import ScanIssue, ScanReport
+from app.ui.batch_assign_dialog import BatchAssignDialog
 from app.ui.main_window import MainWindow
 
 
@@ -49,6 +51,173 @@ def test_assign_source_to_different_target_type(qt_app: QApplication, tmp_path: 
 
     assert ("esf001", "001", "dx", "004") in window.assignments
     assert ("esf001", "001", "normal", "004") not in window.assignments
+
+
+def test_batch_assigns_selected_source_slot_across_characters(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"ryu")
+        archive.writestr(f"{COLOR_ROOT}/esf002/001/esf002_001_cmd_002.user.2", b"luke")
+        archive.writestr(f"{COLOR_ROOT}/esf003/001/esf003_001_cmd_004.user.2", b"jamie")
+
+    window = MainWindow()
+    window.mods = [scan_zip(source_zip)]
+    window.selected_mod = window.mods[0]
+
+    window._batch_assign_sources(
+        {"esf001", "esf002", "esf003"},
+        {"001"},
+        "normal",
+        "002",
+        "normal",
+        "003",
+    )
+
+    assert ("esf001", "001", "normal", "003") in window.assignments
+    assert ("esf002", "001", "normal", "003") in window.assignments
+    assert ("esf003", "001", "normal", "003") not in window.assignments
+
+
+def test_batch_assign_can_change_target_type(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
+
+    window = MainWindow()
+    window.mods = [scan_zip(source_zip)]
+    window.selected_mod = window.mods[0]
+
+    window._batch_assign_sources({"esf001"}, {"001"}, "normal", "002", "dx", "003")
+
+    assignment = window.assignments[("esf001", "001", "dx", "003")]
+    assert assignment.source_slot == "002"
+    assert assignment.type == "dx"
+
+
+def test_batch_assign_respects_selected_costumes(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"c1")
+        archive.writestr(f"{COLOR_ROOT}/esf001/002/esf001_002_cmd_002.user.2", b"c2")
+
+    window = MainWindow()
+    window.mods = [scan_zip(source_zip)]
+    window.selected_mod = window.mods[0]
+
+    window._batch_assign_sources({"esf001"}, {"002"}, "normal", "002", "normal", "003")
+
+    assert ("esf001", "001", "normal", "003") not in window.assignments
+    assert ("esf001", "002", "normal", "003") in window.assignments
+
+
+def test_batch_assign_cancel_replacement_leaves_assignments_unchanged(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    first_zip = tmp_path / "First.zip"
+    second_zip = tmp_path / "Second.zip"
+    with zipfile.ZipFile(first_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=First Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"first")
+    with zipfile.ZipFile(second_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Second Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"second")
+
+    window = MainWindow()
+    window.mods = [scan_zip(first_zip), scan_zip(second_zip)]
+    window.selected_mod = window.mods[0]
+    window._batch_assign_sources({"esf001"}, {"001"}, "normal", "002", "normal", "003")
+    window.selected_mod = window.mods[1]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+    window._batch_assign_sources({"esf001"}, {"001"}, "normal", "002", "normal", "003")
+
+    assert window.assignments[("esf001", "001", "normal", "003")].source_mod_name == "First Mod"
+
+
+def test_batch_assign_confirm_replacement_updates_assignment(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    first_zip = tmp_path / "First.zip"
+    second_zip = tmp_path / "Second.zip"
+    with zipfile.ZipFile(first_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=First Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"first")
+    with zipfile.ZipFile(second_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Second Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"second")
+
+    window = MainWindow()
+    window.mods = [scan_zip(first_zip), scan_zip(second_zip)]
+    window.selected_mod = window.mods[0]
+    window._batch_assign_sources({"esf001"}, {"001"}, "normal", "002", "normal", "003")
+    window.selected_mod = window.mods[1]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    window._batch_assign_sources({"esf001"}, {"001"}, "normal", "002", "normal", "003")
+
+    assert window.assignments[("esf001", "001", "normal", "003")].source_mod_name == "Second Mod"
+
+
+def test_batch_dialog_defaults_characters_unchecked(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"ryu")
+        archive.writestr(f"{COLOR_ROOT}/esf002/001/esf002_001_cmd_002.user.2", b"luke")
+
+    dialog = BatchAssignDialog(scan_zip(source_zip), "normal", "002", "normal")
+
+    assert dialog.selected_characters == set()
+    assert dialog.selected_costumes == set()
+
+
+def test_batch_dialog_text_click_and_select_all_toggle_characters(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"ryu")
+        archive.writestr(f"{COLOR_ROOT}/esf002/001/esf002_001_cmd_002.user.2", b"luke")
+
+    dialog = BatchAssignDialog(scan_zip(source_zip), "normal", "002", "normal")
+    first_item = dialog.character_table.item(0, 0)
+
+    dialog._toggle_table_check(first_item)
+
+    assert first_item.data(256) in dialog.selected_characters
+    assert dialog.selected_costumes == set()
+
+    costume_item = dialog.costume_list.item(0)
+    dialog._toggle_list_check(costume_item)
+    assert dialog.selected_costumes == {"001"}
+
+    dialog._set_all_characters(Qt.Checked)
+    assert dialog.selected_characters == {"esf001", "esf002"}
+
+    dialog._set_all_characters(Qt.Unchecked)
+    assert dialog.selected_characters == set()
+    assert dialog.selected_costumes == set()
 
 
 def test_clear_assignment(qt_app: QApplication, tmp_path: Path) -> None:

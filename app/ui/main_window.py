@@ -42,6 +42,7 @@ from app.settings import (
     AppSettings,
 )
 from app.update_checker import UpdateInfo, check_latest_release
+from app.ui.batch_assign_dialog import BatchAssignDialog
 from app.ui.collection_column import CollectionColumn
 from app.ui.mod_list import ModList
 from app.ui.option_column import OptionColumn
@@ -50,10 +51,9 @@ from app.ui.slot_column import SlotColumn
 
 CHANGE_LOG_MESSAGE = (
     "Recent changes:\n"
-    "- Added scan.log and clearer scan issue reporting.\n"
-    "- Added support for loose top-level mod folders.\n"
-    "- Improved auto-update messaging before the app closes and reopens.\n"
-    "- Added extra character names for esf100 entries."
+    "- Added batch assignment for selected characters and costumes.\n"
+    "- Batch assignment can move one source slot to one target slot across Normal, DX, and EX.\n"
+    "- Added character select controls in the batch assignment dialog."
 )
 
 
@@ -82,6 +82,10 @@ class MainWindow(QMainWindow):
         self.costume_column.setMinimumWidth(116)
         self.slot_column = SlotColumn()
         self.slot_column.setMinimumWidth(190)
+        self.batch_assign_button = QPushButton("Batch Assign")
+        self.batch_assign_button.clicked.connect(self._open_batch_assign_dialog)
+        self.batch_assign_button.setEnabled(False)
+        self.slot_column.layout().addWidget(self.batch_assign_button)
         self.assignment_arrow = QLabel("->")
         self.assignment_arrow.setObjectName("assignmentArrow")
         self.assignment_arrow.setAlignment(Qt.AlignCenter)
@@ -658,6 +662,116 @@ class MainWindow(QMainWindow):
             4000,
         )
 
+    def _open_batch_assign_dialog(self) -> None:
+        if not self.selected_mod:
+            self.statusBar().showMessage("Select a mod before batch assigning.", 3000)
+            return
+
+        dialog = BatchAssignDialog(
+            self.selected_mod,
+            self.slot_column.current_type,
+            self.selected_source_slot,
+            self.collection_column.current_type,
+            self.settings.use_character_names(),
+            self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        self._batch_assign_sources(
+            dialog.selected_characters,
+            dialog.selected_costumes,
+            dialog.source_type,
+            dialog.source_slot,
+            dialog.target_type,
+            dialog.target_slot,
+        )
+
+    def _batch_assign_sources(
+        self,
+        characters: set[str],
+        costumes: set[str],
+        source_type: str,
+        source_slot: str,
+        target_type: str,
+        target_slot: str,
+    ) -> None:
+        if not self.selected_mod:
+            return
+        if not characters or not costumes:
+            self.statusBar().showMessage(
+                "Choose at least one character and costume for batch assignment.",
+                4000,
+            )
+            return
+
+        assignments_to_apply: list[CollectionAssignment] = []
+        for source in sorted(
+            self.selected_mod.source_files,
+            key=lambda item: (item.character, item.costume, item.type, item.source_slot),
+        ):
+            if (
+                source.character not in characters
+                or source.costume not in costumes
+                or source.type != source_type
+                or source.source_slot != source_slot
+            ):
+                continue
+            assignments_to_apply.append(
+                CollectionAssignment(
+                    character=source.character,
+                    costume=source.costume,
+                    type=target_type,
+                    target_slot=target_slot,
+                    source_zip=source.zip_path,
+                    source_kind=source.source_kind,
+                    source_internal_file_path=source.internal_file_path,
+                    source_slot=source.source_slot,
+                    source_mod_name=source.mod_name,
+                )
+            )
+
+        if not assignments_to_apply:
+            self.statusBar().showMessage(
+                "No matching source files found for batch assignment.",
+                4000,
+            )
+            return
+
+        replacements = [
+            assignment
+            for assignment in assignments_to_apply
+            if self.assignments.get(assignment.key)
+            and self.assignments[assignment.key] != assignment
+        ]
+        if replacements:
+            answer = QMessageBox.question(
+                self,
+                "Replace Target Slots",
+                (
+                    f"Replace {len(replacements)} occupied target slot"
+                    f"{'s' if len(replacements) != 1 else ''}?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer != QMessageBox.Yes:
+                self.statusBar().showMessage("Batch assignment was not changed.", 3000)
+                return
+
+        for assignment in assignments_to_apply:
+            self.assignments[assignment.key] = assignment
+
+        self._refresh_columns()
+        self.statusBar().showMessage(
+            (
+                f"Batch assigned {len(assignments_to_apply)} color files from "
+                f"{self._type_slot_label(source_type, source_slot)} to "
+                f"{self._type_slot_label(target_type, target_slot)}."
+            ),
+            5000,
+        )
+
     def _clear_assignment(self, target_type: str, target_slot: str) -> None:
         if not self.selected_character or not self.selected_costume:
             return
@@ -749,6 +863,7 @@ class MainWindow(QMainWindow):
             character=self.selected_character,
             costume=self.selected_costume,
         )
+        self.batch_assign_button.setEnabled(self.selected_mod is not None)
 
     def _all_known_characters(self) -> list[str]:
         characters = {
@@ -997,6 +1112,11 @@ class MainWindow(QMainWindow):
     def _summary_slot_label(self, color_type: str, slot: str) -> str:
         if color_type == "normal":
             return f"{int(slot):02d}"
+        return f"{color_type.upper()}{int(slot):02d}"
+
+    def _type_slot_label(self, color_type: str, slot: str) -> str:
+        if color_type == "normal":
+            return f"Normal {int(slot):02d}"
         return f"{color_type.upper()}{int(slot):02d}"
 
     def _safe_filename(self, name: str, suffix: str) -> str:
