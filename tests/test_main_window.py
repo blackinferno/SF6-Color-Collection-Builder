@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from app.characters import CHARACTER_NAMES
 from app.scanner import scan_zip
 from app.scanner import ScanIssue, ScanReport
 from app.ui.main_window import MainWindow
@@ -322,7 +323,7 @@ def test_collection_summary_rows_include_assignments(qt_app: QApplication, tmp_p
     rows = window._collection_summary_rows()
     table = window._collection_character_table("esf001")
 
-    assert len(rows) == 30 * 5 * 3 * 10
+    assert len(rows) == len(CHARACTER_NAMES) * 5 * 3 * 10
     assert ("Ryu", "Costume 1", "Normal", "04", "Source Mod (Slot 2)") in rows
     assert table.rowCount() == 30
     assert table.columnCount() == 6

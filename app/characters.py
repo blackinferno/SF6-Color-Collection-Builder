@@ -18,17 +18,20 @@ CHARACTER_NAMES = {
     "esf017": "Marisa",
     "esf018": "Guile",
     "esf019": "Ed",
-    "esf020": "E. Honda",
+    "esf020": "E.Honda",
     "esf021": "Jamie",
     "esf022": "Akuma",
     "esf025": "Sagat",
-    "esf026": "M. Bison",
+    "esf026": "M.Bison",
     "esf027": "Terry",
     "esf028": "Mai",
     "esf029": "Elena",
-    "esf030": "C. Viper",
+    "esf030": "C.Viper",
     "esf031": "Alex",
     "esf032": "Ingrid",
+    "esf101": "SiN M.Bison",
+    "esf102": "Shin Akuma",
+    "esf103": "Dark Ingrid",
 }
 
 

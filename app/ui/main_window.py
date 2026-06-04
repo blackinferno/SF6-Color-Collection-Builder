@@ -1018,7 +1018,11 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 "Update Available",
-                f"{message}\n\nDownload and install the update now?",
+                (
+                    f"{message}\n\n"
+                    "Download and install the update now?\n\n"
+                    "The app will close during the update and reopen automatically."
+                ),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
