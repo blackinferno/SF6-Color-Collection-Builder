@@ -23,8 +23,10 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QToolBar,
     QWidget,
+    QApplication,
 )
 
+from app.auto_updater import can_auto_update, launch_prepared_update, prepare_update
 from app.characters import CHARACTER_NAMES, character_label
 from app.exporter import export_collection_zip
 from app.models import CollectionAssignment, ScannedMod
@@ -1012,6 +1014,18 @@ class MainWindow(QMainWindow):
     def _show_update_available(self, update: UpdateInfo) -> None:
         release_url = update.release_url or GITHUB_RELEASES_PAGE_URL
         message = f"Version {update.latest_version} is available."
+        if can_auto_update(update):
+            answer = QMessageBox.question(
+                self,
+                "Update Available",
+                f"{message}\n\nDownload and install the update now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self._download_and_install_update(update)
+            return
+
         if release_url:
             answer = QMessageBox.question(
                 self,
@@ -1024,6 +1038,33 @@ class MainWindow(QMainWindow):
                 webbrowser.open(release_url)
         else:
             QMessageBox.information(self, "Update Available", message)
+
+    def _download_and_install_update(self, update: UpdateInfo) -> None:
+        self.statusBar().showMessage("Downloading update...")
+        QApplication.processEvents()
+        try:
+            prepared_update = prepare_update(update)
+            launch_prepared_update(prepared_update)
+        except Exception as error:
+            release_url = update.release_url or GITHUB_RELEASES_PAGE_URL
+            answer = QMessageBox.warning(
+                self,
+                "Update Failed",
+                (
+                    f"Automatic update failed:\n{error}\n\n"
+                    "Open the GitHub release page instead?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes and release_url:
+                webbrowser.open(release_url)
+            self.statusBar().showMessage("Automatic update failed.", 5000)
+            return
+
+        self.statusBar().showMessage("Applying update. The app will restart...")
+        self.close()
+        QApplication.quit()
 
     def _clear_update_worker(self) -> None:
         self.update_thread = None

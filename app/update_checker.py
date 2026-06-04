@@ -11,6 +11,7 @@ from dataclasses import dataclass
 class UpdateInfo:
     latest_version: str
     release_url: str
+    download_url: str = ""
 
 
 def check_latest_release(
@@ -36,9 +37,28 @@ def check_latest_release(
 
     latest_version = str(payload.get("tag_name") or "").strip()
     release_url = str(payload.get("html_url") or "").strip()
+    download_url = _release_zip_download_url(payload)
     if not latest_version or not is_newer_version(latest_version, current_version):
         return None
-    return UpdateInfo(latest_version=latest_version, release_url=release_url)
+    return UpdateInfo(
+        latest_version=latest_version,
+        release_url=release_url,
+        download_url=download_url,
+    )
+
+
+def _release_zip_download_url(payload: dict) -> str:
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        return ""
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "").lower()
+        download_url = str(asset.get("browser_download_url") or "").strip()
+        if name.endswith(".zip") and download_url:
+            return download_url
+    return ""
 
 
 def is_newer_version(candidate: str, current: str) -> bool:
