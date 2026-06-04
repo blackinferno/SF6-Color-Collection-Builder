@@ -90,7 +90,7 @@ class CollectionColumn(QWidget):
                 character=character,
                 costume=costume,
                 color_type=color_type,
-                ready=source_selected and color_type == source_type,
+                ready=source_selected,
             )
 
     def set_context_options(

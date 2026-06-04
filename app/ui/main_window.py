@@ -571,13 +571,6 @@ class MainWindow(QMainWindow):
             return
 
         source_type = self.slot_column.current_type
-        if target_type != source_type:
-            self.statusBar().showMessage(
-                "Use the matching Custom Collection tab for the selected source type.",
-                3000,
-            )
-            return
-
         source = self.selected_mod.source_for(
             self.selected_character,
             self.selected_costume,
@@ -587,7 +580,7 @@ class MainWindow(QMainWindow):
         if not source:
             return
 
-        key = (source.character, source.costume, source.type, target_slot)
+        key = (source.character, source.costume, target_type, target_slot)
         existing = self.assignments.get(key)
         if existing and existing.source_mod_name != source.mod_name:
             answer = QMessageBox.question(
@@ -607,7 +600,7 @@ class MainWindow(QMainWindow):
         assignment = CollectionAssignment(
             character=source.character,
             costume=source.costume,
-            type=source.type,
+            type=target_type,
             target_slot=target_slot,
             source_zip=source.zip_path,
             source_internal_file_path=source.internal_file_path,
@@ -860,17 +853,28 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("Current Collection")
         dialog.resize(1100, 620)
 
-        tabs = QTabWidget()
-        tabs.setTabPosition(QTabWidget.South)
-        for character in self._sort_characters(CHARACTER_NAMES):
-            table = self._collection_character_table(character)
-            index = tabs.addTab(table, character_label(character))
-            if not self._character_has_assignments(character):
-                tabs.tabBar().setTabTextColor(index, QColor("#69707a"))
+        tabs = self._build_collection_summary_tabs()
 
         layout = QVBoxLayout(dialog)
         layout.addWidget(tabs)
         dialog.exec()
+
+    def _build_collection_summary_tabs(self) -> QTabWidget:
+        tabs = QTabWidget()
+        tabs.setTabPosition(QTabWidget.South)
+        first_assigned_index: int | None = None
+        for character in self._sort_characters(CHARACTER_NAMES):
+            table = self._collection_character_table(character)
+            index = tabs.addTab(table, character_label(character))
+            has_assignments = self._character_has_assignments(character)
+            if has_assignments and first_assigned_index is None:
+                first_assigned_index = index
+            if not has_assignments:
+                tabs.tabBar().setTabTextColor(index, QColor("#69707a"))
+                tabs.setTabEnabled(index, False)
+        if first_assigned_index is not None:
+            tabs.setCurrentIndex(first_assigned_index)
+        return tabs
 
     def _collection_summary_rows(self) -> list[tuple[str, str, str, str, str]]:
         rows: list[tuple[str, str, str, str, str]] = []

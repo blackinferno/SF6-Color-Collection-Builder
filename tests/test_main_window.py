@@ -26,6 +26,24 @@ def test_assign_target_slot(qt_app: QApplication, tmp_path: Path) -> None:
     assert ("esf001", "001", "normal", "004") in window.assignments
 
 
+def test_assign_source_to_different_target_type(qt_app: QApplication, tmp_path: Path) -> None:
+    source_zip = tmp_path / "Source.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Source Mod\n")
+        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+
+    window = MainWindow()
+    window.mods = [scan_zip(source_zip)]
+    window.selected_mod = window.mods[0]
+    window.selected_character = "esf001"
+    window.selected_costume = "001"
+    window.selected_source_slot = "002"
+    window._assign_target_slot("dx", "004")
+
+    assert ("esf001", "001", "dx", "004") in window.assignments
+    assert ("esf001", "001", "normal", "004") not in window.assignments
+
+
 def test_clear_assignment(qt_app: QApplication, tmp_path: Path) -> None:
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
@@ -267,6 +285,36 @@ def test_collection_summary_rows_include_assignments(qt_app: QApplication, tmp_p
     assert table.columnWidth(1) >= 180
     assert window._character_has_assignments("esf001")
     assert not window._character_has_assignments("esf002")
+
+
+def test_collection_summary_disables_empty_character_tabs(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Source.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Source Mod\n")
+        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+
+    window = MainWindow()
+    window.mods = [scan_zip(source_zip)]
+    window.selected_mod = window.mods[0]
+    window.selected_character = "esf001"
+    window.selected_costume = "001"
+    window.selected_source_slot = "002"
+    window._assign_target_slot("normal", "004")
+
+    tabs = window._build_collection_summary_tabs()
+    ryu_index = next(
+        index for index in range(tabs.count()) if tabs.tabText(index) == "Ryu"
+    )
+    luke_index = next(
+        index for index in range(tabs.count()) if tabs.tabText(index) == "Luke"
+    )
+
+    assert tabs.isTabEnabled(ryu_index)
+    assert not tabs.isTabEnabled(luke_index)
+    assert tabs.currentIndex() == ryu_index
 
 
 def test_safe_filename_replaces_windows_invalid_characters(qt_app: QApplication) -> None:

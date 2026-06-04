@@ -11,6 +11,12 @@ def test_rename_slot_only_changes_final_slot() -> None:
     assert rename_slot("esf001_001_cmd_dx_003.user.2", "008") == "esf001_001_cmd_dx_008.user.2"
 
 
+def test_rename_slot_can_change_color_type() -> None:
+    assert rename_slot("esf001_001_cmd_003.user.2", "008", "dx") == "esf001_001_cmd_dx_008.user.2"
+    assert rename_slot("esf001_001_cmd_dx_003.user.2", "008", "normal") == "esf001_001_cmd_008.user.2"
+    assert rename_slot("esf001_001_cmd_ex_003.user.2", "008", "dx") == "esf001_001_cmd_dx_008.user.2"
+
+
 def test_export_collection_zip_writes_fluffy_structure(tmp_path: Path) -> None:
     source_zip = tmp_path / "Source.zip"
     source_internal = "Nested/esf001_001_cmd_002.user.2"
@@ -44,3 +50,28 @@ def test_export_collection_zip_writes_fluffy_structure(tmp_path: Path) -> None:
         manifest = archive.read(f"My Collection/{COLLECTION_MANIFEST_NAME}").decode("utf-8")
         assert '"source_mod_name": "Source Mod"' in manifest
         assert '"source_slot": "002"' in manifest
+
+
+def test_export_collection_zip_changes_color_type_marker(tmp_path: Path) -> None:
+    source_zip = tmp_path / "Source.zip"
+    source_internal = "Nested/esf001_001_cmd_002.user.2"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr(source_internal, b"color data")
+
+    output_zip = tmp_path / "My Collection.zip"
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="ex",
+        target_slot="005",
+        source_zip=source_zip,
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="Source Mod",
+    )
+
+    export_collection_zip(output_zip, "My Collection", [assignment])
+
+    with zipfile.ZipFile(output_zip) as archive:
+        output_path = "My Collection/natives/stm/product/model/esf/esf001/001/esf001_001_cmd_ex_005.user.2"
+        assert archive.read(output_path) == b"color data"

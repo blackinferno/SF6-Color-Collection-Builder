@@ -9,6 +9,10 @@ from app.models import CollectionAssignment
 
 
 SLOT_RE = re.compile(r"_(\d{3})\.user\.2$", re.IGNORECASE)
+COLOR_FILE_RE = re.compile(
+    r"^(?P<prefix>esf\d{3}_\d{3}_cmd)(?:_(?:dx|ex))?_\d{3}\.user\.2$",
+    re.IGNORECASE,
+)
 COLLECTION_IMAGE_NAME = "MyCustomCollection.png"
 COLLECTION_MANIFEST_NAME = "sf6_color_collection_manifest.json"
 COLLECTION_IMAGE_PATH = Path(__file__).resolve().parents[1] / "img" / COLLECTION_IMAGE_NAME
@@ -50,6 +54,7 @@ def export_collection_zip(
             output_filename = rename_slot(
                 PurePosixPath(assignment.source_internal_file_path).name,
                 assignment.target_slot,
+                assignment.type,
             )
             output_internal_path = (
                 f"{root_name}/natives/stm/product/model/esf/"
@@ -82,5 +87,14 @@ def export_collection_zip(
         )
 
 
-def rename_slot(filename: str, target_slot: str) -> str:
-    return SLOT_RE.sub(f"_{target_slot}.user.2", filename.lower())
+def rename_slot(filename: str, target_slot: str, target_type: str | None = None) -> str:
+    lowered = filename.lower()
+    match = COLOR_FILE_RE.match(lowered)
+    if not match:
+        return SLOT_RE.sub(f"_{target_slot}.user.2", lowered)
+
+    if target_type is None:
+        type_match = re.search(r"_cmd_(dx|ex)_", lowered)
+        target_type = type_match.group(1) if type_match else "normal"
+    type_segment = "" if target_type == "normal" else f"_{target_type}"
+    return f"{match.group('prefix')}{type_segment}_{target_slot}.user.2"
