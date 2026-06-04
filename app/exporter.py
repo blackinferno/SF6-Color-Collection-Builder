@@ -11,12 +11,7 @@ from app.models import CollectionAssignment
 SLOT_RE = re.compile(r"_(\d{3})\.user\.2$", re.IGNORECASE)
 COLLECTION_IMAGE_NAME = "MyCustomCollection.png"
 COLLECTION_MANIFEST_NAME = "sf6_color_collection_manifest.json"
-COLLECTION_IMAGE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "Tool"
-    / "MyCustomCollection"
-    / COLLECTION_IMAGE_NAME
-)
+COLLECTION_IMAGE_PATH = Path(__file__).resolve().parents[1] / "img" / COLLECTION_IMAGE_NAME
 
 
 def export_collection_zip(

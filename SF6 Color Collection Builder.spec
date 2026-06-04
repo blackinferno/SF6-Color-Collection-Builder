@@ -5,7 +5,7 @@ a = Analysis(
     ['app\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('img', 'img'), ('Tool/MyCustomCollection/MyCustomCollection.png', 'Tool/MyCustomCollection')],
+    datas=[('img', 'img')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
