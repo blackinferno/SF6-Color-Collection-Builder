@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from app.scanner import scan_mods_folder, scan_zip
+from app.scanner import scan_mods_folder, scan_mods_folder_with_report, scan_zip, write_scan_log
 
 
 COLOR_ROOT = "natives/stm/product/model/esf"
@@ -13,6 +13,16 @@ def _write_zip(path: Path, files: dict[str, str | bytes]) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         for internal_path, content in files.items():
             archive.writestr(internal_path, content)
+
+
+def _write_folder(root: Path, files: dict[str, str | bytes]) -> None:
+    for internal_path, content in files.items():
+        output_path = root / internal_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            output_path.write_bytes(content)
+        else:
+            output_path.write_text(content, encoding="utf-8")
 
 
 def test_scan_zip_detects_modinfo_preview_and_color_files(tmp_path: Path) -> None:
@@ -58,6 +68,29 @@ def test_scan_mods_folder_only_scans_top_level_zips(tmp_path: Path) -> None:
     assert mods[0].source_files[0].source_slot == "010"
 
 
+def test_scan_mods_folder_scans_top_level_loose_folders(tmp_path: Path) -> None:
+    loose = tmp_path / "LooseMod"
+    _write_folder(
+        loose,
+        {
+            "modinfo.ini": "name=Loose Mod\nauthor=Folder Creator\nimage=preview.png\n",
+            "preview.png": b"fake image",
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mods = scan_mods_folder(tmp_path)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "Loose Mod"
+    assert mods[0].source_kind == "folder"
+    assert mods[0].preview_image_path_in_zip == "preview.png"
+    assert mods[0].source_files[0].source_kind == "folder"
+    assert mods[0].source_files[0].internal_file_path == (
+        f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2"
+    )
+
+
 def test_scan_mods_folder_excludes_zips_without_supported_color_files(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "InfoOnly.zip",
@@ -77,6 +110,23 @@ def test_scan_mods_folder_excludes_loose_matching_filenames(tmp_path: Path) -> N
     )
 
     assert scan_mods_folder(tmp_path) == []
+
+
+def test_scan_report_logs_loose_matching_filenames_outside_structure(tmp_path: Path) -> None:
+    _write_folder(
+        tmp_path / "LooseFolder",
+        {
+            "modinfo.ini": "name=Loose Folder\n",
+            "random/esf001_001_cmd_002.user.2": b"not structured",
+        },
+    )
+
+    report = scan_mods_folder_with_report(tmp_path)
+
+    assert report.mods == []
+    assert len(report.issues) == 1
+    assert report.issues[0].package_path.name == "LooseFolder"
+    assert report.issues[0].internal_path == "random/esf001_001_cmd_002.user.2"
 
 
 def test_scan_zip_reads_modinfo_percent_values_without_interpolation(tmp_path: Path) -> None:
@@ -114,6 +164,22 @@ def test_scan_zip_ignores_malformed_modinfo_lines(tmp_path: Path) -> None:
     assert mod.detected_file_count == 1
 
 
+def test_scan_report_records_malformed_modinfo(tmp_path: Path) -> None:
+    _write_zip(
+        tmp_path / "MalformedInfo.zip",
+        {
+            "modinfo.ini": "name=Bad\nThis line has no equals sign\n",
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    report = scan_mods_folder_with_report(tmp_path)
+
+    assert len(report.mods) == 1
+    assert len(report.issues) == 1
+    assert report.issues[0].display_path == "MalformedInfo.zip / modinfo.ini"
+
+
 def test_scan_mods_folder_splits_submods_with_overlapping_slots(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "DXEX Colors.zip",
@@ -135,3 +201,36 @@ def test_scan_mods_folder_splits_submods_with_overlapping_slots(tmp_path: Path) 
     assert mods[1].source_for("esf001", "001", "dx", "001").internal_file_path == (
         f"EX/{COLOR_ROOT}/esf001/001/esf001_001_cmd_dx_001.user.2"
     )
+
+
+def test_scan_mods_folder_splits_loose_folder_submods(tmp_path: Path) -> None:
+    loose = tmp_path / "DXEX Colors"
+    _write_folder(
+        loose,
+        {
+            "DX/modinfo.ini": "name=DX Colors\nauthor=Creator\n",
+            f"DX/{COLOR_ROOT}/esf001/001/esf001_001_cmd_dx_001.user.2": b"dx",
+            "EX/modinfo.ini": "name=EX Colors\nauthor=Creator\n",
+            f"EX/{COLOR_ROOT}/esf001/001/esf001_001_cmd_dx_001.user.2": b"ex package dx slot",
+        },
+    )
+
+    mods = scan_mods_folder(tmp_path)
+
+    assert [mod.mod_name for mod in mods] == ["DXEX Colors > DX", "DXEX Colors > EX"]
+    assert [mod.source_kind for mod in mods] == ["folder", "folder"]
+
+
+def test_scan_log_contains_issue_paths(tmp_path: Path) -> None:
+    _write_folder(
+        tmp_path / "LooseFolder",
+        {"random/esf001_001_cmd_002.user.2": b"not structured"},
+    )
+    report = scan_mods_folder_with_report(tmp_path)
+    log_path = tmp_path / "scan.log"
+
+    write_scan_log(tmp_path, report, log_path)
+
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "LooseFolder / random/esf001_001_cmd_002.user.2" in log_text
+    assert "Issues: 1" in log_text

@@ -75,3 +75,33 @@ def test_export_collection_zip_changes_color_type_marker(tmp_path: Path) -> None
     with zipfile.ZipFile(output_zip) as archive:
         output_path = "My Collection/natives/stm/product/model/esf/esf001/001/esf001_001_cmd_ex_005.user.2"
         assert archive.read(output_path) == b"color data"
+
+
+def test_export_collection_zip_reads_folder_source_files(tmp_path: Path) -> None:
+    source_folder = tmp_path / "Source Folder"
+    source_internal = "natives/stm/product/model/esf/esf001/001/esf001_001_cmd_002.user.2"
+    (source_folder / "natives/stm/product/model/esf/esf001/001").mkdir(
+        parents=True
+    )
+    (source_folder / source_internal).write_bytes(b"folder color data")
+
+    output_zip = tmp_path / "My Collection.zip"
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="dx",
+        target_slot="006",
+        source_zip=source_folder,
+        source_kind="folder",
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="Folder Source",
+    )
+
+    export_collection_zip(output_zip, "My Collection", [assignment])
+
+    with zipfile.ZipFile(output_zip) as archive:
+        output_path = "My Collection/natives/stm/product/model/esf/esf001/001/esf001_001_cmd_dx_006.user.2"
+        assert archive.read(output_path) == b"folder color data"
+        manifest = archive.read(f"My Collection/{COLLECTION_MANIFEST_NAME}").decode("utf-8")
+        assert '"source_kind": "folder"' in manifest

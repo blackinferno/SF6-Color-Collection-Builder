@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from app.scanner import scan_zip
+from app.scanner import ScanIssue, ScanReport
 from app.ui.main_window import MainWindow
 
 
@@ -150,12 +151,35 @@ def test_scan_folder_failure_clears_remembered_mods_folder(
     def fail_scan(_folder):
         raise RuntimeError("bad zip")
 
-    monkeypatch.setattr("app.ui.main_window.scan_mods_folder", fail_scan)
+    monkeypatch.setattr("app.ui.main_window.scan_mods_folder_with_report", fail_scan)
 
     window._scan_folder(tmp_path)
 
     assert window.settings.last_mods_folder() == ""
     assert window.mods == []
+
+
+def test_scan_folder_reports_scan_issues_in_status(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    issue = ScanIssue(
+        package_path=tmp_path / "Broken.zip",
+        internal_path="modinfo.ini",
+        message="Malformed modinfo.ini",
+    )
+
+    monkeypatch.setattr(
+        "app.ui.main_window.scan_mods_folder_with_report",
+        lambda _folder: ScanReport([], [issue]),
+    )
+
+    window._scan_folder(tmp_path)
+
+    assert "1 scan issues written to scan.log" in window.statusBar().currentMessage()
+    assert "Broken.zip / modinfo.ini" in window.statusBar().currentMessage()
 
 
 def test_selecting_character_auto_selects_single_costume_and_dx_slot(

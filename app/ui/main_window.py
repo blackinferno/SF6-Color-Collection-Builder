@@ -30,8 +30,8 @@ from app.auto_updater import can_auto_update, launch_prepared_update, prepare_up
 from app.characters import CHARACTER_NAMES, character_label
 from app.exporter import export_collection_zip
 from app.models import CollectionAssignment, ScannedMod
-from app.project_io import load_exported_collection_zip, save_project
-from app.scanner import scan_mods_folder
+from app.project_io import load_exported_collection_zip
+from app.scanner import scan_mods_folder_with_report
 from app.settings import (
     APP_ICON_PATH,
     APP_NAME,
@@ -487,7 +487,8 @@ class MainWindow(QMainWindow):
     def _scan_folder(self, folder: Path) -> None:
         self.statusBar().showMessage("Scanning zip mods...")
         try:
-            self.mods = scan_mods_folder(folder)
+            report = scan_mods_folder_with_report(folder)
+            self.mods = report.mods
         except Exception as error:
             self.settings.set_last_mods_folder("")
             self.mods = []
@@ -510,9 +511,18 @@ class MainWindow(QMainWindow):
         self.selected_costume = None
         self.selected_source_slot = None
         self._refresh_columns()
-        self.statusBar().showMessage(
-            f"Found {len(self.mods)} zip mods with supported data.", 5000
-        )
+        if report.issues:
+            self.statusBar().showMessage(
+                (
+                    f"Found {len(self.mods)} mods. {len(report.issues)} scan issues "
+                    f"written to scan.log. First: {report.issues[0].display_path}"
+                ),
+                8000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Found {len(self.mods)} mods with supported data.", 5000
+            )
 
     def _select_mod(self, index: int) -> None:
         self.selected_mod = self.mods[index]
@@ -626,6 +636,7 @@ class MainWindow(QMainWindow):
             type=target_type,
             target_slot=target_slot,
             source_zip=source.zip_path,
+            source_kind=source.source_kind,
             source_internal_file_path=source.internal_file_path,
             source_slot=source.source_slot,
             source_mod_name=source.mod_name,
@@ -844,17 +855,6 @@ class MainWindow(QMainWindow):
         self.selected_source_slot = None
 
     def _export_to_path(self, output_path: Path) -> None:
-        if output_path.suffix.lower() == ".json":
-            save_project(
-                output_path,
-                self.collection_name,
-                self.settings.last_mods_folder(),
-                sorted(self.assignments.values(), key=lambda item: item.key),
-            )
-            self.settings.set_last_project_folder(output_path.parent)
-            self.statusBar().showMessage(f"Saved {output_path.name}.", 5000)
-            return
-
         if not self.assignments:
             QMessageBox.information(
                 self,

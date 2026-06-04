@@ -22,7 +22,7 @@ You do not need Python unless you want to run or modify the source code.
 
 ## Features
 
-- Scan a mods folder for `.zip` files.
+- Scan a mods folder for `.zip` files and loose top-level mod folders.
 - Detect SF6 `.user.2` color files, `modinfo.ini`, and preview images.
 - Display available characters, costumes, and normal/DX/EX source slots.
 - Assign source slots into a custom collection.
@@ -32,6 +32,7 @@ You do not need Python unless you want to run or modify the source code.
 - Show a full current collection summary by character.
 - Remember the last mods folder, save folder, and window size.
 - Check GitHub releases for updates.
+- Write scan warnings to `scan.log` beside the executable.
 
 ## Install
 

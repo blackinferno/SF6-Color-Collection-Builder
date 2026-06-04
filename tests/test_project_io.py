@@ -4,28 +4,7 @@ from pathlib import Path
 
 from app.models import CollectionAssignment
 from app.exporter import export_collection_zip
-from app.project_io import load_exported_collection_zip, load_project, save_project
-
-
-def test_save_and_load_project(tmp_path: Path) -> None:
-    project_path = tmp_path / "project.json"
-    assignment = CollectionAssignment(
-        character="esf001",
-        costume="001",
-        type="normal",
-        target_slot="003",
-        source_zip=tmp_path / "Source.zip",
-        source_internal_file_path="x/esf001_001_cmd_002.user.2",
-        source_slot="002",
-        source_mod_name="Source Mod",
-    )
-
-    save_project(project_path, "My Collection", "C:/Mods", [assignment])
-    collection_name, mods_folder, assignments = load_project(project_path)
-
-    assert collection_name == "My Collection"
-    assert mods_folder == "C:/Mods"
-    assert assignments == [assignment]
+from app.project_io import load_exported_collection_zip
 
 
 def test_load_exported_collection_zip(tmp_path: Path) -> None:

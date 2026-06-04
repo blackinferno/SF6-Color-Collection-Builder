@@ -45,11 +45,14 @@ def export_collection_zip(
             archive.write(
                 COLLECTION_IMAGE_PATH,
                 f"{root_name}/{COLLECTION_IMAGE_NAME}",
-            )
+        )
 
         for assignment in assignments:
-            with zipfile.ZipFile(assignment.source_zip) as source_zip:
-                data = source_zip.read(assignment.source_internal_file_path)
+            if assignment.source_kind == "folder":
+                data = (assignment.source_zip / assignment.source_internal_file_path).read_bytes()
+            else:
+                with zipfile.ZipFile(assignment.source_zip) as source_zip:
+                    data = source_zip.read(assignment.source_internal_file_path)
 
             output_filename = rename_slot(
                 PurePosixPath(assignment.source_internal_file_path).name,
@@ -70,6 +73,7 @@ def export_collection_zip(
                     "exported_internal_file_path": output_internal_path,
                     "source_slot": assignment.source_slot,
                     "source_mod_name": assignment.source_mod_name,
+                    "source_kind": assignment.source_kind,
                 }
             )
 

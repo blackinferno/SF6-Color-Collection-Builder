@@ -87,8 +87,11 @@ class ModList(QWidget):
         pixmap.fill(Qt.transparent)
         if mod.preview_image_path_in_zip:
             try:
-                with zipfile.ZipFile(mod.zip_path) as archive:
-                    image_bytes = archive.read(mod.preview_image_path_in_zip)
+                if mod.source_kind == "folder":
+                    image_bytes = (mod.zip_path / mod.preview_image_path_in_zip).read_bytes()
+                else:
+                    with zipfile.ZipFile(mod.zip_path) as archive:
+                        image_bytes = archive.read(mod.preview_image_path_in_zip)
                 loaded = QPixmap()
                 if loaded.loadFromData(image_bytes):
                     pixmap = loaded.scaled(

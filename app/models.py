@@ -27,6 +27,7 @@ class SourceColorFile:
     costume: str
     type: str
     source_slot: str
+    source_kind: str = "zip"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class CollectionAssignment:
     source_internal_file_path: str
     source_slot: str
     source_mod_name: str
+    source_kind: str = "zip"
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -49,6 +51,7 @@ class CollectionAssignment:
 class ScannedMod:
     zip_path: Path
     mod_name: str
+    source_kind: str = "zip"
     author: str = ""
     description: str = ""
     metadata: dict[str, str] = field(default_factory=dict)

@@ -11,50 +11,6 @@ from app.models import CollectionAssignment
 from app.parser import parse_color_filename
 
 
-def save_project(
-    path: str | Path,
-    collection_name: str,
-    mods_folder: str,
-    assignments: list[CollectionAssignment],
-) -> None:
-    payload = {
-        "collection_name": collection_name,
-        "mods_folder": mods_folder,
-        "assignments": [
-            {
-                "character": assignment.character,
-                "costume": assignment.costume,
-                "type": assignment.type,
-                "target_slot": assignment.target_slot,
-                "source_zip": str(assignment.source_zip),
-                "source_internal_file_path": assignment.source_internal_file_path,
-                "source_slot": assignment.source_slot,
-                "source_mod_name": assignment.source_mod_name,
-            }
-            for assignment in assignments
-        ],
-    }
-    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def load_project(path: str | Path) -> tuple[str, str, list[CollectionAssignment]]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    assignments = [
-        CollectionAssignment(
-            character=item["character"],
-            costume=item["costume"],
-            type=item["type"],
-            target_slot=item["target_slot"],
-            source_zip=Path(item["source_zip"]),
-            source_internal_file_path=item["source_internal_file_path"],
-            source_slot=item["source_slot"],
-            source_mod_name=item["source_mod_name"],
-        )
-        for item in payload.get("assignments", [])
-    ]
-    return payload.get("collection_name", "Custom Collection"), payload.get("mods_folder", ""), assignments
-
-
 def load_exported_collection_zip(path: str | Path) -> tuple[str, str, list[CollectionAssignment]]:
     zip_path = Path(path)
     collection_name = zip_path.stem
@@ -91,6 +47,7 @@ def load_exported_collection_zip(path: str | Path) -> tuple[str, str, list[Colle
                     type=parsed.type,
                     target_slot=parsed.slot,
                     source_zip=zip_path,
+                    source_kind="zip",
                     source_internal_file_path=name,
                     source_slot=parsed.slot,
                     source_mod_name=collection_name,
@@ -126,6 +83,7 @@ def _load_manifest_assignments(
                 type=item["type"],
                 target_slot=item["target_slot"],
                 source_zip=zip_path,
+                source_kind="zip",
                 source_internal_file_path=internal_path,
                 source_slot=item["source_slot"],
                 source_mod_name=item["source_mod_name"],

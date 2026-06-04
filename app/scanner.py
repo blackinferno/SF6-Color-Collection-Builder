@@ -3,10 +3,13 @@ from __future__ import annotations
 import configparser
 import zipfile
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 from app.models import ParsedColorFile, ScannedMod, SourceColorFile
 from app.parser import parse_color_filename
+from app.settings import SCAN_LOG_PATH
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -14,20 +17,59 @@ IMAGE_KEYS = ("image", "preview", "screenshot", "thumbnail", "picture")
 COLOR_FILE_PATH_PARTS = ("natives", "stm", "product", "model", "esf")
 
 
+@dataclass(frozen=True)
+class ScanIssue:
+    package_path: Path
+    internal_path: str | None
+    message: str
+    detail: str = ""
+
+    @property
+    def display_path(self) -> str:
+        if self.internal_path:
+            return f"{self.package_path.name} / {self.internal_path}"
+        return self.package_path.name
+
+
+@dataclass(frozen=True)
+class ScanReport:
+    mods: list[ScannedMod]
+    issues: list[ScanIssue]
+
+
 def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
-    """Scan top-level .zip files in a selected mods folder."""
+    return scan_mods_folder_with_report(folder).mods
+
+
+def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
+    """Scan top-level .zip files and immediate folders in a selected mods folder."""
     root = Path(folder)
     if not root.exists() or not root.is_dir():
-        return []
+        report = ScanReport([], [])
+        write_scan_log(root, report)
+        return report
 
     mods: list[ScannedMod] = []
-    for zip_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
-        if zip_path.is_file() and zip_path.suffix.lower() == ".zip":
+    issues: list[ScanIssue] = []
+    for package_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
+        if package_path.is_file() and package_path.suffix.lower() == ".zip":
             try:
-                mods.extend(scan_zip_mods(zip_path))
-            except zipfile.BadZipFile:
+                package_mods, package_issues = scan_zip_mods_with_issues(package_path)
+            except zipfile.BadZipFile as error:
+                issues.append(
+                    ScanIssue(package_path, None, "Bad or unreadable zip file", str(error))
+                )
                 continue
-    return mods
+            mods.extend(package_mods)
+            issues.extend(package_issues)
+        elif package_path.is_dir():
+            package_mods, package_issues = scan_folder_mods_with_issues(package_path)
+            mods.extend(package_mods)
+            issues.extend(package_issues)
+
+    report = ScanReport(sorted(mods, key=lambda mod: mod.mod_name.lower()), issues)
+    write_scan_log(root, report)
+    return report
 
 
 def scan_zip(zip_path: str | Path) -> ScannedMod:
@@ -38,39 +80,120 @@ def scan_zip(zip_path: str | Path) -> ScannedMod:
 
 
 def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
-    zip_path = Path(zip_path)
+    return scan_zip_mods_with_issues(zip_path)[0]
+
+
+def scan_zip_mods_with_issues(zip_path: str | Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
+    package_path = Path(zip_path)
+    with zipfile.ZipFile(package_path) as archive:
+        entries = [
+            name.replace("\\", "/")
+            for name in archive.namelist()
+            if not name.endswith("/")
+        ]
+    return _scan_package_entries(
+        package_path=package_path,
+        source_kind="zip",
+        entries=entries,
+        read_modinfo=lambda path: _read_zip_modinfo(package_path, path),
+    )
+
+
+def scan_folder_mods_with_issues(folder_path: str | Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
+    package_path = Path(folder_path)
+    entries: list[str] = []
+    issues: list[ScanIssue] = []
+    try:
+        files = [path for path in package_path.rglob("*") if path.is_file()]
+    except OSError as error:
+        return [], [ScanIssue(package_path, None, "Could not read folder", str(error))]
+
+    for file_path in files:
+        try:
+            entries.append(file_path.relative_to(package_path).as_posix())
+        except ValueError as error:
+            issues.append(
+                ScanIssue(package_path, str(file_path), "Could not resolve file path", str(error))
+            )
+
+    mods, scan_issues = _scan_package_entries(
+        package_path=package_path,
+        source_kind="folder",
+        entries=entries,
+        read_modinfo=lambda path: _read_folder_modinfo(package_path, path),
+    )
+    return mods, [*issues, *scan_issues]
+
+
+def write_scan_log(folder: Path, report: ScanReport, log_path: Path = SCAN_LOG_PATH) -> None:
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{datetime.now().isoformat(timespec='seconds')}]\n")
+            log_file.write(f"Folder: {folder}\n")
+            log_file.write(f"Mods found: {len(report.mods)}\n")
+            log_file.write(f"Issues: {len(report.issues)}\n")
+            for issue in report.issues:
+                detail = f" - {issue.detail}" if issue.detail else ""
+                log_file.write(f"- {issue.display_path}: {issue.message}{detail}\n")
+            log_file.write("\n")
+    except OSError:
+        return
+
+
+def _scan_package_entries(
+    package_path: Path,
+    source_kind: str,
+    entries: list[str],
+    read_modinfo,
+) -> tuple[list[ScannedMod], list[ScanIssue]]:
     image_paths: list[str] = []
     parsed_files: list[tuple[str, ParsedColorFile]] = []
     modinfo_paths: list[str] = []
+    issues: list[ScanIssue] = []
 
-    with zipfile.ZipFile(zip_path) as archive:
-        names = [name for name in archive.namelist() if not name.endswith("/")]
+    for name in entries:
+        path = PurePosixPath(name)
+        if path.name.lower() == "modinfo.ini":
+            modinfo_paths.append(name)
 
-        for name in names:
-            path = PurePosixPath(name)
-            if path.name.lower() == "modinfo.ini":
-                modinfo_paths.append(name)
+        if path.suffix.lower() in IMAGE_SUFFIXES:
+            image_paths.append(name)
 
-            if path.suffix.lower() in IMAGE_SUFFIXES:
-                image_paths.append(name)
-
-            if not _has_supported_color_file_structure(path):
-                continue
-
-            parsed = parse_color_filename(path.name)
-            if parsed:
-                parsed_files.append((name, parsed))
+        parsed = parse_color_filename(path.name)
+        if not parsed:
+            continue
+        if not _has_supported_color_file_structure(path):
+            issues.append(
+                ScanIssue(
+                    package_path,
+                    name,
+                    "Supported color filename is outside the SF6 color folder structure",
+                )
+            )
+            continue
+        parsed_files.append((name, parsed))
 
     if not parsed_files:
-        return []
+        return [], issues
 
-    with zipfile.ZipFile(zip_path) as archive:
-        modinfos = {
-            modinfo_path: _read_modinfo(archive, modinfo_path)
-            for modinfo_path in modinfo_paths
-        }
+    modinfos: dict[str, dict[str, str]] = {}
+    for modinfo_path in modinfo_paths:
+        try:
+            data, parse_error = read_modinfo(modinfo_path)
+        except OSError as error:
+            issues.append(
+                ScanIssue(package_path, modinfo_path, "Could not read modinfo.ini", str(error))
+            )
+            continue
+        if parse_error:
+            issues.append(
+                ScanIssue(package_path, modinfo_path, "Malformed modinfo.ini", parse_error)
+            )
+        else:
+            modinfos[modinfo_path] = data
 
-    grouped_files = _group_parsed_files(zip_path, parsed_files, modinfos)
+    grouped_files = _group_parsed_files(package_path, parsed_files, modinfos)
     mods: list[ScannedMod] = []
     for group_root, group_files in grouped_files.items():
         modinfo_path = _modinfo_for_group(group_root, modinfos)
@@ -80,10 +203,11 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
             modinfo_path,
             _images_for_group(group_root, image_paths),
         )
-        mod_name = _mod_name_for_group(zip_path, group_root, grouped_files, modinfo_data)
+        mod_name = _mod_name_for_group(package_path, group_root, grouped_files, modinfo_data)
         mod = ScannedMod(
-            zip_path=zip_path,
+            zip_path=package_path,
             mod_name=mod_name,
+            source_kind=source_kind,
             author=modinfo_data.get("author", ""),
             description=modinfo_data.get("description", ""),
             metadata=modinfo_data,
@@ -92,7 +216,7 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
         )
         mod.source_files = [
             SourceColorFile(
-                zip_path=zip_path,
+                zip_path=package_path,
                 mod_name=mod.mod_name,
                 author=mod.author,
                 preview_image_path_in_zip=preview_path,
@@ -101,12 +225,13 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
                 costume=parsed.costume,
                 type=parsed.type,
                 source_slot=parsed.slot,
+                source_kind=source_kind,
             )
             for internal_path, parsed in group_files
         ]
         mods.append(mod)
 
-    return sorted(mods, key=lambda mod: mod.mod_name.lower())
+    return sorted(mods, key=lambda mod: mod.mod_name.lower()), issues
 
 
 def _has_supported_color_file_structure(path: PurePosixPath) -> bool:
@@ -118,8 +243,18 @@ def _has_supported_color_file_structure(path: PurePosixPath) -> bool:
     )
 
 
-def _read_modinfo(archive: zipfile.ZipFile, name: str) -> dict[str, str]:
-    raw = archive.read(name).decode("utf-8-sig", errors="replace")
+def _read_zip_modinfo(package_path: Path, name: str) -> tuple[dict[str, str], str]:
+    with zipfile.ZipFile(package_path) as archive:
+        raw = archive.read(name).decode("utf-8-sig", errors="replace")
+    return _parse_modinfo(raw)
+
+
+def _read_folder_modinfo(package_path: Path, name: str) -> tuple[dict[str, str], str]:
+    raw = (package_path / name).read_text(encoding="utf-8-sig", errors="replace")
+    return _parse_modinfo(raw)
+
+
+def _parse_modinfo(raw: str) -> tuple[dict[str, str], str]:
     parser = configparser.ConfigParser(interpolation=None)
     parser.optionxform = str.lower
 
@@ -128,13 +263,13 @@ def _read_modinfo(archive: zipfile.ZipFile, name: str) -> dict[str, str]:
 
     try:
         parser.read_string(raw)
-    except configparser.Error:
-        return {}
+    except configparser.Error as error:
+        return {}, str(error)
     data: dict[str, str] = {}
     for section in parser.sections():
         for key, value in parser.items(section):
             data[key.strip().lower()] = value.strip()
-    return data
+    return data, ""
 
 
 def _group_parsed_files(
