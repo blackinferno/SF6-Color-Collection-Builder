@@ -11,6 +11,7 @@ from app.parser import parse_color_filename
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 IMAGE_KEYS = ("image", "preview", "screenshot", "thumbnail", "picture")
+COLOR_FILE_PATH_PARTS = ("natives", "stm", "product", "model", "esf")
 
 
 def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
@@ -52,6 +53,9 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
 
             if path.suffix.lower() in IMAGE_SUFFIXES:
                 image_paths.append(name)
+
+            if not _has_supported_color_file_structure(path):
+                continue
 
             parsed = parse_color_filename(path.name)
             if parsed:
@@ -103,6 +107,15 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
         mods.append(mod)
 
     return sorted(mods, key=lambda mod: mod.mod_name.lower())
+
+
+def _has_supported_color_file_structure(path: PurePosixPath) -> bool:
+    parts = tuple(part.lower() for part in path.parts)
+    required_length = len(COLOR_FILE_PATH_PARTS)
+    return any(
+        parts[index : index + required_length] == COLOR_FILE_PATH_PARTS
+        for index in range(0, len(parts) - required_length + 1)
+    )
 
 
 def _read_modinfo(archive: zipfile.ZipFile, name: str) -> dict[str, str]:

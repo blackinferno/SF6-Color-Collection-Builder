@@ -9,11 +9,14 @@ from app.scanner import scan_zip
 from app.ui.main_window import MainWindow
 
 
+COLOR_ROOT = "natives/stm/product/model/esf"
+
+
 def test_assign_target_slot(qt_app: QApplication, tmp_path: Path) -> None:
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -30,7 +33,7 @@ def test_assign_source_to_different_target_type(qt_app: QApplication, tmp_path: 
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -48,7 +51,7 @@ def test_clear_assignment(qt_app: QApplication, tmp_path: Path) -> None:
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -69,7 +72,7 @@ def test_assigned_collection_row_uses_widget_without_duplicate_item_text(
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -94,7 +97,7 @@ def test_switching_mod_keeps_collection_context(qt_app: QApplication, tmp_path: 
     for zip_path, name in ((first_zip, "First Mod"), (second_zip, "Second Mod")):
         with zipfile.ZipFile(zip_path, "w") as archive:
             archive.writestr("modinfo.ini", f"name={name}\n")
-            archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+            archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(first_zip), scan_zip(second_zip)]
@@ -121,7 +124,7 @@ def test_selecting_single_path_mod_auto_selects_character_costume_and_slot(
     source_zip = tmp_path / "SingleCharacter.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Single Character\n")
-        archive.writestr("x/esf002_003_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf002/003/esf002_003_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -143,7 +146,7 @@ def test_selecting_character_auto_selects_single_costume_and_dx_slot(
     source_zip = tmp_path / "SingleDx.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Single DX\n")
-        archive.writestr("x/esf002_003_cmd_dx_004.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf002/003/esf002_003_cmd_dx_004.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -163,7 +166,7 @@ def test_collection_context_controls_select_assignment_context(
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf002_003_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf002/003/esf002_003_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -263,7 +266,7 @@ def test_collection_summary_rows_include_assignments(qt_app: QApplication, tmp_p
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
@@ -294,7 +297,7 @@ def test_collection_summary_disables_empty_character_tabs(
     source_zip = tmp_path / "Source.zip"
     with zipfile.ZipFile(source_zip, "w") as archive:
         archive.writestr("modinfo.ini", "name=Source Mod\n")
-        archive.writestr("x/esf001_001_cmd_002.user.2", b"data")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"data")
 
     window = MainWindow()
     window.mods = [scan_zip(source_zip)]
