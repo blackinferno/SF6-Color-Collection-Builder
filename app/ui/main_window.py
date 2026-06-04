@@ -48,6 +48,15 @@ from app.ui.option_column import OptionColumn
 from app.ui.slot_column import SlotColumn
 
 
+CHANGE_LOG_MESSAGE = (
+    "Recent changes:\n"
+    "- Added scan.log and clearer scan issue reporting.\n"
+    "- Added support for loose top-level mod folders.\n"
+    "- Improved auto-update messaging before the app closes and reopens.\n"
+    "- Added extra character names for esf100 entries."
+)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -85,6 +94,7 @@ class MainWindow(QMainWindow):
         self._apply_styles()
         self._refresh_columns()
         self._scan_last_mods_folder()
+        self._show_version_changes_once()
         self._check_for_updates_on_startup()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -995,6 +1005,16 @@ class MainWindow(QMainWindow):
             for character in name.strip()
         ).strip()
         return f"{safe_name or 'Custom Collection'}{suffix}"
+
+    def _show_version_changes_once(self) -> None:
+        if self.settings.last_shown_changes_version() == APP_VERSION:
+            return
+        QMessageBox.information(
+            self,
+            f"What's New in {APP_VERSION}",
+            CHANGE_LOG_MESSAGE,
+        )
+        self.settings.set_last_shown_changes_version(APP_VERSION)
 
     def _check_for_updates_on_startup(self) -> None:
         if not self.settings.check_updates() or not GITHUB_RELEASES_API_URL:

@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 
 APP_NAME = "SF6 Color Collection Builder"
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.1.3"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 APP_DATA_ROOT = (
@@ -76,6 +76,12 @@ class AppSettings:
             "display/use_character_names",
             USE_CHARACTER_NAMES_DEFAULT,
         )
+
+    def last_shown_changes_version(self) -> str:
+        return str(self._settings.value("updates/last_shown_changes_version", "", str))
+
+    def set_last_shown_changes_version(self, version: str) -> None:
+        self._settings.setValue("updates/last_shown_changes_version", version)
 
     def _bool_value(self, key: str, default: bool) -> bool:
         value = self._settings.value(key, default)

@@ -4,8 +4,10 @@ import zipfile
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QMessageBox
 
 from app.characters import CHARACTER_NAMES
+from app.settings import APP_VERSION
 from app.scanner import scan_zip
 from app.scanner import ScanIssue, ScanReport
 from app.ui.main_window import MainWindow
@@ -368,3 +370,25 @@ def test_safe_filename_replaces_windows_invalid_characters(qt_app: QApplication)
     window = MainWindow()
 
     assert window._safe_filename('My:Bad/Name', ".zip") == "My_Bad_Name.zip"
+
+
+def test_version_changes_dialog_only_shows_once(
+    qt_app: QApplication,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    window.settings.set_last_shown_changes_version("")
+    calls: list[tuple[str, str]] = []
+
+    def record_message(_parent, title, message):
+        calls.append((title, message))
+        return QMessageBox.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", record_message)
+
+    window._show_version_changes_once()
+    window._show_version_changes_once()
+
+    assert len(calls) == 1
+    assert APP_VERSION in calls[0][0]
+    assert window.settings.last_shown_changes_version() == APP_VERSION

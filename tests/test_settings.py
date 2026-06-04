@@ -25,3 +25,11 @@ def test_settings_are_written_to_local_ini_file() -> None:
     assert "last_mods_folder" in settings_module.SETTINGS_PATH.read_text(
         encoding="utf-8"
     )
+
+
+def test_last_shown_changes_version_round_trips() -> None:
+    settings = AppSettings()
+
+    settings.set_last_shown_changes_version("0.1.3")
+
+    assert settings.last_shown_changes_version() == "0.1.3"

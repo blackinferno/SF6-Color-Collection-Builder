@@ -22,4 +22,5 @@ def isolated_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(settings_module, "SETTINGS_PATH", tmp_path / "settings.ini")
     settings = settings_module.AppSettings()
     settings._settings.setValue("updates/check_on_startup", False)
+    settings.set_last_shown_changes_version(settings_module.APP_VERSION)
     yield
