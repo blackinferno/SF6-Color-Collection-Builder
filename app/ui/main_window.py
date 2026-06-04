@@ -316,6 +316,11 @@ class MainWindow(QMainWindow):
                 color: #ffffff;
                 border-color: #f97306;
             }
+            QTabBar::tab:disabled {
+                color: #555555;
+                background: #0f0f0f;
+                border-color: #202020;
+            }
             QListWidget::item {
                 padding: 4px;
                 border-radius: 4px;
@@ -865,8 +870,9 @@ class MainWindow(QMainWindow):
         first_assigned_index: int | None = None
         for character in self._sort_characters(CHARACTER_NAMES):
             table = self._collection_character_table(character)
-            index = tabs.addTab(table, character_label(character))
             has_assignments = self._character_has_assignments(character)
+            label = character_label(character) if has_assignments else f"- {character_label(character)}"
+            index = tabs.addTab(table, label)
             if has_assignments and first_assigned_index is None:
                 first_assigned_index = index
             if not has_assignments:

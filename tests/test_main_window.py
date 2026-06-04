@@ -309,7 +309,7 @@ def test_collection_summary_disables_empty_character_tabs(
         index for index in range(tabs.count()) if tabs.tabText(index) == "Ryu"
     )
     luke_index = next(
-        index for index in range(tabs.count()) if tabs.tabText(index) == "Luke"
+        index for index in range(tabs.count()) if tabs.tabText(index) == "- Luke"
     )
 
     assert tabs.isTabEnabled(ryu_index)
