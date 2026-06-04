@@ -126,7 +126,10 @@ def _read_modinfo(archive: zipfile.ZipFile, name: str) -> dict[str, str]:
     if not raw.lstrip().startswith("["):
         raw = "[mod]\n" + raw
 
-    parser.read_string(raw)
+    try:
+        parser.read_string(raw)
+    except configparser.Error:
+        return {}
     data: dict[str, str] = {}
     for section in parser.sections():
         for key, value in parser.items(section):

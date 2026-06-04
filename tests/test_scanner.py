@@ -95,6 +95,25 @@ def test_scan_zip_reads_modinfo_percent_values_without_interpolation(tmp_path: P
     assert mod.description == "50% Transparency"
 
 
+def test_scan_zip_ignores_malformed_modinfo_lines(tmp_path: Path) -> None:
+    zip_path = tmp_path / "MalformedInfo.zip"
+    _write_zip(
+        zip_path,
+        {
+            "modinfo.ini": (
+                "name=Malformed Info\n"
+                "To display this info in Fluffy Mod Manager, please rename this file from .txt to .ini.\n"
+            ),
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mod = scan_zip(zip_path)
+
+    assert mod.mod_name == "MalformedInfo"
+    assert mod.detected_file_count == 1
+
+
 def test_scan_mods_folder_splits_submods_with_overlapping_slots(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "DXEX Colors.zip",
