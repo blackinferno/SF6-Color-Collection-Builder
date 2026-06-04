@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 
 APP_NAME = "SF6 Color Collection Builder"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 APP_DATA_ROOT = (
