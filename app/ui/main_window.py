@@ -871,8 +871,7 @@ class MainWindow(QMainWindow):
         for character in self._sort_characters(CHARACTER_NAMES):
             table = self._collection_character_table(character)
             has_assignments = self._character_has_assignments(character)
-            label = character_label(character) if has_assignments else f"- {character_label(character)}"
-            index = tabs.addTab(table, label)
+            index = tabs.addTab(table, character_label(character))
             if has_assignments and first_assigned_index is None:
                 first_assigned_index = index
             if not has_assignments:
