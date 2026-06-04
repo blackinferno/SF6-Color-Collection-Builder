@@ -22,7 +22,10 @@ def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
     mods: list[ScannedMod] = []
     for zip_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
         if zip_path.is_file() and zip_path.suffix.lower() == ".zip":
-            mods.extend(scan_zip_mods(zip_path))
+            try:
+                mods.extend(scan_zip_mods(zip_path))
+            except zipfile.BadZipFile:
+                continue
     return mods
 
 
@@ -37,7 +40,7 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
     zip_path = Path(zip_path)
     image_paths: list[str] = []
     parsed_files: list[tuple[str, ParsedColorFile]] = []
-    modinfos: dict[str, dict[str, str]] = {}
+    modinfo_paths: list[str] = []
 
     with zipfile.ZipFile(zip_path) as archive:
         names = [name for name in archive.namelist() if not name.endswith("/")]
@@ -45,7 +48,7 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
         for name in names:
             path = PurePosixPath(name)
             if path.name.lower() == "modinfo.ini":
-                modinfos[name] = _read_modinfo(archive, name)
+                modinfo_paths.append(name)
 
             if path.suffix.lower() in IMAGE_SUFFIXES:
                 image_paths.append(name)
@@ -56,6 +59,12 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
 
     if not parsed_files:
         return []
+
+    with zipfile.ZipFile(zip_path) as archive:
+        modinfos = {
+            modinfo_path: _read_modinfo(archive, modinfo_path)
+            for modinfo_path in modinfo_paths
+        }
 
     grouped_files = _group_parsed_files(zip_path, parsed_files, modinfos)
     mods: list[ScannedMod] = []
@@ -98,7 +107,7 @@ def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
 
 def _read_modinfo(archive: zipfile.ZipFile, name: str) -> dict[str, str]:
     raw = archive.read(name).decode("utf-8-sig", errors="replace")
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     parser.optionxform = str.lower
 
     if not raw.lstrip().startswith("["):

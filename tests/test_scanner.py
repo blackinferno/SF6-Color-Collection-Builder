@@ -58,10 +58,26 @@ def test_scan_mods_folder_only_scans_top_level_zips(tmp_path: Path) -> None:
 def test_scan_mods_folder_excludes_zips_without_supported_color_files(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "InfoOnly.zip",
-        {"modinfo.ini": "name=Info Only\n", "preview.png": b"image"},
+        {"modinfo.ini": "name=Info Only\npercent=50% Transparency\n", "preview.png": b"image"},
     )
 
     assert scan_mods_folder(tmp_path) == []
+
+
+def test_scan_zip_reads_modinfo_percent_values_without_interpolation(tmp_path: Path) -> None:
+    zip_path = tmp_path / "PercentMod.zip"
+    _write_zip(
+        zip_path,
+        {
+            "modinfo.ini": "name=Percent Mod\ndescription=50% Transparency\n",
+            "esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mod = scan_zip(zip_path)
+
+    assert mod.mod_name == "Percent Mod"
+    assert mod.description == "50% Transparency"
 
 
 def test_scan_mods_folder_splits_submods_with_overlapping_slots(tmp_path: Path) -> None:
