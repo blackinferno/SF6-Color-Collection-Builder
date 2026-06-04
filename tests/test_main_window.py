@@ -188,6 +188,7 @@ def test_batch_dialog_defaults_characters_unchecked(
 
     assert dialog.selected_characters == set()
     assert dialog.selected_costumes == set()
+    assert dialog.costume_list.count() == 1
 
 
 def test_batch_dialog_text_click_and_select_all_toggle_characters(
@@ -217,7 +218,39 @@ def test_batch_dialog_text_click_and_select_all_toggle_characters(
 
     dialog._set_all_characters(Qt.Unchecked)
     assert dialog.selected_characters == set()
-    assert dialog.selected_costumes == set()
+    assert dialog.selected_costumes == {"001"}
+
+
+def test_batch_dialog_source_slots_filter_by_selected_character(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Batch.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("modinfo.ini", "name=Batch Mod\n")
+        archive.writestr(f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2", b"ryu")
+        archive.writestr(f"{COLOR_ROOT}/esf002/001/esf002_001_cmd_004.user.2", b"luke")
+
+    dialog = BatchAssignDialog(scan_zip(source_zip), "normal", "002", "normal")
+    normal_slot_02 = dialog.source_table.item(1, 0)
+    normal_slot_04 = dialog.source_table.item(3, 0)
+
+    assert normal_slot_02.flags() & Qt.ItemIsEnabled
+    assert normal_slot_04.flags() & Qt.ItemIsEnabled
+
+    luke_item = next(
+        dialog.character_table.item(row, column)
+        for row in range(dialog.character_table.rowCount())
+        for column in range(dialog.character_table.columnCount())
+        if dialog.character_table.item(row, column)
+        and dialog.character_table.item(row, column).data(256) == "esf002"
+    )
+    dialog._toggle_table_check(luke_item)
+
+    normal_slot_02 = dialog.source_table.item(1, 0)
+    normal_slot_04 = dialog.source_table.item(3, 0)
+    assert not (normal_slot_02.flags() & Qt.ItemIsEnabled)
+    assert normal_slot_04.flags() & Qt.ItemIsEnabled
 
 
 def test_clear_assignment(qt_app: QApplication, tmp_path: Path) -> None:
@@ -522,17 +555,17 @@ def test_collection_summary_disables_empty_character_tabs(
     window.selected_source_slot = "002"
     window._assign_target_slot("normal", "004")
 
-    tabs = window._build_collection_summary_tabs()
-    ryu_index = next(
-        index for index in range(tabs.count()) if tabs.tabText(index) == "Ryu"
-    )
-    luke_index = next(
-        index for index in range(tabs.count()) if tabs.tabText(index) == "Luke"
-    )
+    summary = window._build_collection_summary_tabs()
+    buttons = summary.character_tab_buttons
+    stack = summary.character_stack
+    ryu_index = next(index for index, button in enumerate(buttons) if button.text() == "Ryu")
+    luke_index = next(index for index, button in enumerate(buttons) if button.text() == "Luke")
 
-    assert tabs.isTabEnabled(ryu_index)
-    assert not tabs.isTabEnabled(luke_index)
-    assert tabs.currentIndex() == ryu_index
+    assert len(buttons) == len(CHARACTER_NAMES)
+    assert buttons[ryu_index].isEnabled()
+    assert buttons[ryu_index].isChecked()
+    assert not buttons[luke_index].isEnabled()
+    assert stack.currentIndex() == ryu_index
 
 
 def test_safe_filename_replaces_windows_invalid_characters(qt_app: QApplication) -> None:
@@ -544,10 +577,14 @@ def test_safe_filename_replaces_windows_invalid_characters(qt_app: QApplication)
 def test_version_changes_dialog_only_shows_once(
     qt_app: QApplication,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     window = MainWindow()
     window.settings.set_last_shown_changes_version("")
     calls: list[tuple[str, str]] = []
+    release_notes_path = tmp_path / "release_notes.txt"
+    release_notes_path.write_text("Editable update text", encoding="utf-8")
+    monkeypatch.setattr("app.ui.main_window.RELEASE_NOTES_PATH", release_notes_path)
 
     def record_message(_parent, title, message):
         calls.append((title, message))
@@ -560,4 +597,19 @@ def test_version_changes_dialog_only_shows_once(
 
     assert len(calls) == 1
     assert APP_VERSION in calls[0][0]
+    assert calls[0][1] == "Editable update text"
     assert window.settings.last_shown_changes_version() == APP_VERSION
+
+
+def test_version_changes_dialog_falls_back_to_default_message(
+    qt_app: QApplication,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow()
+    monkeypatch.setattr(
+        "app.ui.main_window.RELEASE_NOTES_PATH",
+        tmp_path / "missing_release_notes.txt",
+    )
+
+    assert "Recent changes:" in window._release_notes_message()

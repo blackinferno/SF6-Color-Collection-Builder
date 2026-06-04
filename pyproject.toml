@@ -1,6 +1,6 @@
 [project]
 name = "sf6-color-collection-builder"
-version = "0.1.4"
+version = "0.1.5"
 description = "Windows desktop tool for building SF6 color-slot collection mods."
 requires-python = ">=3.11"
 dependencies = [

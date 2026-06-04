@@ -7,6 +7,7 @@ from PySide6.QtCore import QObject, QThread, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
-    QTabWidget,
+    QStackedWidget,
     QToolBar,
     QWidget,
     QApplication,
@@ -39,6 +40,7 @@ from app.settings import (
     GITHUB_RELEASES_API_URL,
     GITHUB_RELEASES_PAGE_URL,
     PROJECT_ROOT,
+    RELEASE_NOTES_PATH,
     AppSettings,
 )
 from app.update_checker import UpdateInfo, check_latest_release
@@ -455,6 +457,31 @@ class MainWindow(QMainWindow):
             QPushButton#clearSlotButton:hover {
                 background: #1e1e1e;
                 border-color: #f97306;
+            }
+            QPushButton#summaryTabButton {
+                border: 1px solid #2a2a2a;
+                border-radius: 0;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
+                background: #141414;
+                color: #c8c8c8;
+                padding: 6px 12px;
+                font-weight: 400;
+                min-height: 20px;
+            }
+            QPushButton#summaryTabButton:checked {
+                background: rgba(249, 115, 6, 0.16);
+                border-color: #f97306;
+                color: #ffffff;
+            }
+            QPushButton#summaryTabButton:hover:enabled {
+                color: #ffffff;
+                border-color: #f97306;
+            }
+            QPushButton#summaryTabButton:disabled {
+                color: #555555;
+                background: #0f0f0f;
+                border-color: #202020;
             }
             QToolTip {
                 background: #222222;
@@ -1001,28 +1028,62 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("Current Collection")
         dialog.resize(1100, 620)
 
-        tabs = self._build_collection_summary_tabs()
+        summary = self._build_collection_summary_tabs()
 
         layout = QVBoxLayout(dialog)
-        layout.addWidget(tabs)
+        layout.addWidget(summary)
         dialog.exec()
 
-    def _build_collection_summary_tabs(self) -> QTabWidget:
-        tabs = QTabWidget()
-        tabs.setTabPosition(QTabWidget.South)
+    def _build_collection_summary_tabs(self) -> QWidget:
+        view = QWidget()
+        stack = QStackedWidget()
+        tab_layout = QGridLayout()
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(4)
+
         first_assigned_index: int | None = None
-        for character in self._sort_characters(CHARACTER_NAMES):
+        tab_buttons: list[QPushButton] = []
+        columns = 8
+        for index, character in enumerate(self._sort_characters(CHARACTER_NAMES)):
             table = self._collection_character_table(character)
             has_assignments = self._character_has_assignments(character)
-            index = tabs.addTab(table, character_label(character))
+            stack.addWidget(table)
+            button = QPushButton(character_label(character))
+            button.setObjectName("summaryTabButton")
+            button.setCheckable(True)
+            button.setEnabled(has_assignments)
+            button.clicked.connect(
+                lambda _checked=False, current_index=index: self._select_summary_tab(
+                    stack,
+                    tab_buttons,
+                    current_index,
+                )
+            )
+            tab_layout.addWidget(button, index // columns, index % columns)
+            tab_buttons.append(button)
             if has_assignments and first_assigned_index is None:
                 first_assigned_index = index
-            if not has_assignments:
-                tabs.tabBar().setTabTextColor(index, QColor("#69707a"))
-                tabs.setTabEnabled(index, False)
+
         if first_assigned_index is not None:
-            tabs.setCurrentIndex(first_assigned_index)
-        return tabs
+            self._select_summary_tab(stack, tab_buttons, first_assigned_index)
+
+        layout = QVBoxLayout(view)
+        layout.addWidget(stack, 1)
+        layout.addLayout(tab_layout)
+
+        view.character_stack = stack  # type: ignore[attr-defined]
+        view.character_tab_buttons = tab_buttons  # type: ignore[attr-defined]
+        return view
+
+    def _select_summary_tab(
+        self,
+        stack: QStackedWidget,
+        tab_buttons: list[QPushButton],
+        index: int,
+    ) -> None:
+        stack.setCurrentIndex(index)
+        for button_index, button in enumerate(tab_buttons):
+            button.setChecked(button_index == index)
 
     def _collection_summary_rows(self) -> list[tuple[str, str, str, str, str]]:
         rows: list[tuple[str, str, str, str, str]] = []
@@ -1132,9 +1193,16 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             f"What's New in {APP_VERSION}",
-            CHANGE_LOG_MESSAGE,
+            self._release_notes_message(),
         )
         self.settings.set_last_shown_changes_version(APP_VERSION)
+
+    def _release_notes_message(self) -> str:
+        try:
+            message = RELEASE_NOTES_PATH.read_text(encoding="utf-8-sig").strip()
+        except OSError:
+            message = ""
+        return message or CHANGE_LOG_MESSAGE
 
     def _check_for_updates_on_startup(self) -> None:
         if not self.settings.check_updates() or not GITHUB_RELEASES_API_URL:

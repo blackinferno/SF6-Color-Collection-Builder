@@ -1,0 +1,3 @@
+Recent changes:
+- Fixed bug related overwriting exiting custom collection zip
+- Made show current collection window more easier to navigate

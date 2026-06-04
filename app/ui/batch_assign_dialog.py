@@ -3,6 +3,7 @@ from __future__ import annotations
 from math import ceil
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -27,6 +28,8 @@ from app.parser import format_slot_label
 
 class BatchAssignDialog(QDialog):
     COLUMNS = (("normal", ""), ("dx", "DX"), ("ex", "EX"))
+    ENABLED_COLOR = QColor("#ffffff")
+    DISABLED_COLOR = QColor("#69707a")
 
     def __init__(
         self,
@@ -44,6 +47,8 @@ class BatchAssignDialog(QDialog):
         self.use_character_names = use_character_names
         self._source_selection: tuple[str, str] | None = None
         self._target_selection: tuple[str, str] | None = None
+        self._default_source_type = selected_source_type
+        self._default_source_slot = selected_source_slot
 
         self.character_table = QTableWidget()
         self.character_table.setColumnCount(2)
@@ -67,12 +72,7 @@ class BatchAssignDialog(QDialog):
         self._build_layout()
         self._populate_characters()
         self._refresh_costumes()
-        self._populate_slot_table(
-            self.source_table,
-            enabled_slots=self._available_source_slots(),
-            selected_type=selected_source_type,
-            selected_slot=selected_source_slot,
-        )
+        self._refresh_source_slots(selected_source_type, selected_source_slot)
         default_target_slot = selected_source_slot or self._first_available_source_slot()
         self._populate_slot_table(
             self.target_table,
@@ -81,7 +81,8 @@ class BatchAssignDialog(QDialog):
             selected_slot=default_target_slot,
         )
 
-        self.character_table.itemChanged.connect(self._refresh_costumes)
+        self.character_table.itemChanged.connect(self._refresh_after_character_change)
+        self.costume_list.itemChanged.connect(self._refresh_after_costume_change)
         self.source_table.itemClicked.connect(self._select_source_item)
         self.target_table.itemClicked.connect(self._select_target_item)
 
@@ -190,11 +191,12 @@ class BatchAssignDialog(QDialog):
 
     def _refresh_costumes(self) -> None:
         checked_costumes = self.selected_costumes
+        selected_characters = self.selected_characters
         available_costumes = sorted(
             {
                 source.costume
                 for source in self.mod.source_files
-                if source.character in self.selected_characters
+                if not selected_characters or source.character in selected_characters
             }
         )
         self.costume_list.blockSignals(True)
@@ -215,6 +217,13 @@ class BatchAssignDialog(QDialog):
     def _toggle_list_check(self, item: QListWidgetItem) -> None:
         item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
 
+    def _refresh_after_character_change(self) -> None:
+        self._refresh_costumes()
+        self._refresh_source_slots()
+
+    def _refresh_after_costume_change(self) -> None:
+        self._refresh_source_slots()
+
     def _set_all_characters(self, check_state: Qt.CheckState) -> None:
         self.character_table.blockSignals(True)
         for row in range(self.character_table.rowCount()):
@@ -224,6 +233,23 @@ class BatchAssignDialog(QDialog):
                     item.setCheckState(check_state)
         self.character_table.blockSignals(False)
         self._refresh_costumes()
+        self._refresh_source_slots()
+
+    def _refresh_source_slots(
+        self,
+        selected_type: str | None = None,
+        selected_slot: str | None = None,
+    ) -> None:
+        current_type, current_slot = self._source_selection or (
+            self._default_source_type,
+            self._default_source_slot,
+        )
+        self._populate_slot_table(
+            self.source_table,
+            enabled_slots=self._available_source_slots_for_selection(),
+            selected_type=selected_type or current_type,
+            selected_slot=selected_slot or current_slot,
+        )
 
     def _populate_slot_table(
         self,
@@ -243,6 +269,9 @@ class BatchAssignDialog(QDialog):
                 enabled = (color_type, slot) in enabled_slots
                 if not enabled:
                     item.setFlags(item.flags() & ~Qt.ItemIsEnabled & ~Qt.ItemIsSelectable)
+                    item.setForeground(QBrush(self.DISABLED_COLOR))
+                else:
+                    item.setForeground(QBrush(self.ENABLED_COLOR))
                 table.setItem(row, column, item)
                 if enabled and fallback is None:
                     fallback = item
@@ -272,6 +301,16 @@ class BatchAssignDialog(QDialog):
 
     def _available_source_slots(self) -> set[tuple[str, str]]:
         return {(source.type, source.source_slot) for source in self.mod.source_files}
+
+    def _available_source_slots_for_selection(self) -> set[tuple[str, str]]:
+        selected_characters = self.selected_characters
+        selected_costumes = self.selected_costumes
+        return {
+            (source.type, source.source_slot)
+            for source in self.mod.source_files
+            if (not selected_characters or source.character in selected_characters)
+            and (not selected_costumes or source.costume in selected_costumes)
+        }
 
     def _first_available_source_slot(self) -> str | None:
         available = sorted(

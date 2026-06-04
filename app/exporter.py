@@ -25,6 +25,10 @@ def export_collection_zip(
 ) -> None:
     output_path = Path(output_path)
     root_name = output_path.stem if not collection_name else collection_name
+    source_payloads = [
+        (assignment, _read_assignment_data(assignment))
+        for assignment in assignments
+    ]
     manifest_assignments = []
 
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -47,13 +51,7 @@ def export_collection_zip(
                 f"{root_name}/{COLLECTION_IMAGE_NAME}",
         )
 
-        for assignment in assignments:
-            if assignment.source_kind == "folder":
-                data = (assignment.source_zip / assignment.source_internal_file_path).read_bytes()
-            else:
-                with zipfile.ZipFile(assignment.source_zip) as source_zip:
-                    data = source_zip.read(assignment.source_internal_file_path)
-
+        for assignment, data in source_payloads:
             output_filename = rename_slot(
                 PurePosixPath(assignment.source_internal_file_path).name,
                 assignment.target_slot,
@@ -89,6 +87,13 @@ def export_collection_zip(
                 indent=2,
             ),
         )
+
+
+def _read_assignment_data(assignment: CollectionAssignment) -> bytes:
+    if assignment.source_kind == "folder":
+        return (assignment.source_zip / assignment.source_internal_file_path).read_bytes()
+    with zipfile.ZipFile(assignment.source_zip) as source_zip:
+        return source_zip.read(assignment.source_internal_file_path)
 
 
 def rename_slot(filename: str, target_slot: str, target_type: str | None = None) -> str:
