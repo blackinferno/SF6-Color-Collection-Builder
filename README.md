@@ -4,7 +4,7 @@ This tool is not meant to replace, reupload, or take credit for the work of mod 
 
 Color Collection Builder is only a convenience tool that helps you organize compatible color mods into a single collection so you can enjoy more of the community’s work at once.
 
-Please support, credit, and thank the original modders. If you share a collection or screenshots using their work, make sure to follow each creator’s permissions and give proper credit.
+Please support, credit, and thank the original modders. If you share a collection using their work, make sure to follow each creator’s permissions and give proper credit.
 
 # SF6 Color Collection Builder
 
