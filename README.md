@@ -4,6 +4,14 @@ Windows desktop app for building custom Street Fighter 6 color-slot collection z
 
 The tool scans SF6 color mod `.zip` files, shows detected characters, costumes, and color slots, then lets you assign those source colors into a custom collection that can be saved as a Fluffy Mod Manager compatible zip.
 
+## Download
+
+Most users should download the Windows release zip here:
+
+<https://github.com/blackinferno/SF6-Color-Collection-Builder/releases>
+
+You do not need Python unless you want to run or modify the source code.
+
 ## Features
 
 - Scan a mods folder for `.zip` files.
@@ -17,11 +25,7 @@ The tool scans SF6 color mod `.zip` files, shows detected characters, costumes, 
 - Remember the last mods folder, save folder, and window size.
 - Check GitHub releases for updates.
 
-## Install From Release
-
-Download the latest release from:
-
-<https://github.com/blackinferno/SF6-Color-Collection-Builder/releases>
+## Install
 
 Extract the release zip and run:
 
