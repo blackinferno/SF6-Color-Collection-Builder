@@ -15,5 +15,6 @@ dist/
 release/
 
 settings.ini
+scan.log
 
 *.log
