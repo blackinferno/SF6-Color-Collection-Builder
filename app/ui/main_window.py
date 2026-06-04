@@ -895,7 +895,9 @@ class MainWindow(QMainWindow):
                                 f"Costume {int(costume)}",
                                 type_label,
                                 f"{int(slot):02d}",
-                                assignment.source_mod_name if assignment else "empty",
+                                self._assignment_summary_label(assignment)
+                                if assignment
+                                else "empty",
                             )
                         )
         return rows
@@ -932,7 +934,11 @@ class MainWindow(QMainWindow):
                 table.setItem(
                     row_index,
                     column_index,
-                    QTableWidgetItem(assignment.source_mod_name if assignment else ""),
+                    QTableWidgetItem(
+                        self._assignment_summary_label(assignment)
+                        if assignment
+                        else ""
+                    ),
                 )
 
         table.resizeColumnsToContents()
@@ -941,6 +947,9 @@ class MainWindow(QMainWindow):
             table.setColumnWidth(column, max(table.columnWidth(column), 180))
         table.resizeRowsToContents()
         return table
+
+    def _assignment_summary_label(self, assignment: CollectionAssignment) -> str:
+        return f"{assignment.source_mod_name} (Slot {int(assignment.source_slot)})"
 
     def _character_has_assignments(self, character: str) -> bool:
         return any(

@@ -259,10 +259,10 @@ def test_collection_summary_rows_include_assignments(qt_app: QApplication, tmp_p
     table = window._collection_character_table("esf001")
 
     assert len(rows) == 30 * 5 * 3 * 10
-    assert ("Ryu", "Costume 1", "Normal", "04", "Source Mod") in rows
+    assert ("Ryu", "Costume 1", "Normal", "04", "Source Mod (Slot 2)") in rows
     assert table.rowCount() == 30
     assert table.columnCount() == 6
-    assert table.item(3, 1).text() == "Source Mod"
+    assert table.item(3, 1).text() == "Source Mod (Slot 2)"
     assert table.verticalHeaderItem(0).text() == "01"
     assert table.columnWidth(1) >= 180
     assert window._character_has_assignments("esf001")
