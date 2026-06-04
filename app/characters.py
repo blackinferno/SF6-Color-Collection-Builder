@@ -1,0 +1,36 @@
+CHARACTER_NAMES = {
+    "esf001": "Ryu",
+    "esf002": "Luke",
+    "esf003": "Kimberly",
+    "esf004": "Chun-Li",
+    "esf005": "Manon",
+    "esf006": "Zangief",
+    "esf007": "JP",
+    "esf008": "Dhalsim",
+    "esf009": "Cammy",
+    "esf010": "Ken",
+    "esf011": "Dee Jay",
+    "esf012": "Lily",
+    "esf013": "A.K.I.",
+    "esf014": "Rashid",
+    "esf015": "Blanka",
+    "esf016": "Juri",
+    "esf017": "Marisa",
+    "esf018": "Guile",
+    "esf019": "Ed",
+    "esf020": "E. Honda",
+    "esf021": "Jamie",
+    "esf022": "Akuma",
+    "esf025": "Sagat",
+    "esf026": "M. Bison",
+    "esf027": "Terry",
+    "esf028": "Mai",
+    "esf029": "Elena",
+    "esf030": "C. Viper",
+    "esf031": "Alex",
+    "esf032": "Ingrid",
+}
+
+
+def character_label(character_id: str) -> str:
+    return CHARACTER_NAMES.get(character_id, character_id)
