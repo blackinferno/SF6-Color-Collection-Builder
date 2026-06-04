@@ -139,6 +139,25 @@ def test_selecting_single_path_mod_auto_selects_character_costume_and_slot(
     assert window.slot_column.current_type == "normal"
 
 
+def test_scan_folder_failure_clears_remembered_mods_folder(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    window.settings.set_last_mods_folder(tmp_path)
+
+    def fail_scan(_folder):
+        raise RuntimeError("bad zip")
+
+    monkeypatch.setattr("app.ui.main_window.scan_mods_folder", fail_scan)
+
+    window._scan_folder(tmp_path)
+
+    assert window.settings.last_mods_folder() == ""
+    assert window.mods == []
+
+
 def test_selecting_character_auto_selects_single_costume_and_dx_slot(
     qt_app: QApplication,
     tmp_path: Path,

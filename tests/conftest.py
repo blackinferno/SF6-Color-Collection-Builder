@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
-from app.settings import APP_NAME, ORG_NAME
+import app.settings as settings_module
 
 
 @pytest.fixture
@@ -18,12 +18,8 @@ def qt_app() -> QApplication:
 
 
 @pytest.fixture(autouse=True)
-def disable_startup_update_check() -> None:
-    settings = QSettings(ORG_NAME, APP_NAME)
-    original = settings.value("updates/check_on_startup", None)
-    settings.setValue("updates/check_on_startup", False)
+def isolated_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings_module, "SETTINGS_PATH", tmp_path / "settings.ini")
+    settings = settings_module.AppSettings()
+    settings._settings.setValue("updates/check_on_startup", False)
     yield
-    if original is None:
-        settings.remove("updates/check_on_startup")
-    else:
-        settings.setValue("updates/check_on_startup", original)

@@ -484,7 +484,23 @@ class MainWindow(QMainWindow):
 
     def _scan_folder(self, folder: Path) -> None:
         self.statusBar().showMessage("Scanning zip mods...")
-        self.mods = scan_mods_folder(folder)
+        try:
+            self.mods = scan_mods_folder(folder)
+        except Exception as error:
+            self.settings.set_last_mods_folder("")
+            self.mods = []
+            self.mod_list.set_mods(self.mods)
+            self.mod_list.show_preview(None)
+            self.selected_mod = None
+            self.selected_character = None
+            self.selected_costume = None
+            self.selected_source_slot = None
+            self._refresh_columns()
+            self.statusBar().showMessage(
+                f"Scan failed. Cleared remembered mods folder: {error}",
+                8000,
+            )
+            return
         self.mod_list.set_mods(self.mods)
         self.mod_list.show_preview(None)
         self.selected_mod = None

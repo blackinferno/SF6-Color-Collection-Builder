@@ -41,6 +41,8 @@ Extract the release zip and run:
 SF6 Color Collection Builder.exe
 ```
 
+The app stores local preferences in `settings.ini` beside the executable. Delete that file to reset remembered folders and window size.
+
 ## Run From Source
 
 ```powershell

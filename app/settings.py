@@ -10,6 +10,12 @@ APP_NAME = "SF6 Color Collection Builder"
 APP_VERSION = "0.1.0"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+APP_DATA_ROOT = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parents[1]
+)
+SETTINGS_PATH = APP_DATA_ROOT / "settings.ini"
 APP_ICON_PATH = PROJECT_ROOT / "img" / "colormixer.png"
 GITHUB_RELEASES_API_URL = (
     "https://api.github.com/repos/blackinferno/SF6-Color-Collection-Builder/releases/latest"
@@ -25,7 +31,7 @@ USE_CHARACTER_NAMES_DEFAULT = True
 
 class AppSettings:
     def __init__(self) -> None:
-        self._settings = QSettings(ORG_NAME, APP_NAME)
+        self._settings = QSettings(str(SETTINGS_PATH), QSettings.IniFormat)
 
     def last_mods_folder(self) -> str:
         return str(self._settings.value("paths/last_mods_folder", "", str))

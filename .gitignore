@@ -14,4 +14,6 @@ build/
 dist/
 release/
 
+settings.ini
+
 *.log
