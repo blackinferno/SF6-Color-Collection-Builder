@@ -31,6 +31,11 @@ USE_CHARACTER_NAMES_DEFAULT = True
 
 class AppSettings:
     def __init__(self) -> None:
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.touch(exist_ok=True)
+        except OSError:
+            pass
         self._settings = QSettings(str(SETTINGS_PATH), QSettings.IniFormat)
 
     def last_mods_folder(self) -> str:

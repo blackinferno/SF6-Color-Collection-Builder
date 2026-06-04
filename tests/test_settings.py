@@ -18,10 +18,10 @@ def test_window_geometry_round_trips() -> None:
 def test_settings_are_written_to_local_ini_file() -> None:
     settings = AppSettings()
 
+    assert settings_module.SETTINGS_PATH.exists()
     settings.set_last_mods_folder("C:/Mods")
     settings._settings.sync()
 
-    assert settings_module.SETTINGS_PATH.exists()
     assert "last_mods_folder" in settings_module.SETTINGS_PATH.read_text(
         encoding="utf-8"
     )
