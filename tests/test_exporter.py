@@ -151,3 +151,71 @@ def test_export_collection_zip_can_overwrite_loaded_collection_zip(tmp_path: Pat
         assert archive.read(output_path) == b"original color data"
         manifest = archive.read(f"Existing Collection/{COLLECTION_MANIFEST_NAME}")
         assert b'"source_slot": "002"' in manifest
+
+
+def test_export_collection_zip_preserves_existing_metadata_when_requested(
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Source.zip"
+    source_internal = "Nested/esf001_001_cmd_002.user.2"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr(source_internal, b"color data")
+
+    output_zip = tmp_path / "Existing Mod.zip"
+    with zipfile.ZipFile(output_zip, "w") as archive:
+        archive.writestr(
+            "Existing Mod/modinfo.ini",
+            "\n".join(
+                (
+                    "name=Existing Mod",
+                    "version=9.9",
+                    "description=Original description",
+                    "screenshot=CustomPreview.png",
+                    "author=Original Author",
+                    "",
+                )
+            ),
+        )
+        archive.writestr("Existing Mod/CustomPreview.png", b"custom preview")
+
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="normal",
+        target_slot="004",
+        source_zip=source_zip,
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="Source Mod",
+    )
+
+    export_collection_zip(
+        output_zip,
+        "Existing Mod",
+        [assignment],
+        preserve_existing_metadata=True,
+    )
+
+    with zipfile.ZipFile(output_zip) as archive:
+        names = archive.namelist()
+        modinfo = archive.read("Existing Mod/modinfo.ini").decode("utf-8")
+        assert "version=9.9" in modinfo
+        assert "author=Original Author" in modinfo
+        assert "screenshot=CustomPreview.png" in modinfo
+        assert (
+            "description=Original description *Edited by Color Collection Builder"
+            in modinfo
+        )
+        assert archive.read("Existing Mod/CustomPreview.png") == b"custom preview"
+        assert "Existing Mod/MyCustomCollection.png" not in names
+
+    export_collection_zip(
+        output_zip,
+        "Existing Mod",
+        [assignment],
+        preserve_existing_metadata=True,
+    )
+
+    with zipfile.ZipFile(output_zip) as archive:
+        modinfo = archive.read("Existing Mod/modinfo.ini").decode("utf-8")
+        assert modinfo.count("*Edited by Color Collection Builder") == 1

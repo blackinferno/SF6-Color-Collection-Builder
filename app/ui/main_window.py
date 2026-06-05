@@ -1020,6 +1020,7 @@ class MainWindow(QMainWindow):
             output_path,
             self.collection_name,
             sorted(self.assignments.values(), key=lambda item: item.key),
+            preserve_existing_metadata=output_path.exists(),
         )
         self.statusBar().showMessage(f"Saved {output_path.name}.", 5000)
 
