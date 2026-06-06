@@ -15,6 +15,8 @@ from app.settings import SCAN_LOG_PATH
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 IMAGE_KEYS = ("image", "preview", "screenshot", "thumbnail", "picture")
 COLOR_FILE_PATH_PARTS = ("natives", "stm", "product", "model", "esf")
+NATIVES_COLOR_FILE_PATH_PARTS = ("stm", "product", "model", "esf")
+RECHUNK_COLOR_ROOT_PARTS = ("natives", "stm", "product", "model", "esf")
 
 
 @dataclass(frozen=True)
@@ -41,9 +43,48 @@ def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
     return scan_mods_folder_with_report(folder).mods
 
 
+def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
+    """Fast scan for base CMD sources under natives/stm/product/model/esf only."""
+    root = Path(source)
+    if root.is_file() and root.suffix.lower() == ".zip":
+        try:
+            mods = _scan_rechunk_zip(root)
+            report = ScanReport(mods, [])
+        except zipfile.BadZipFile as error:
+            report = ScanReport(
+                [],
+                [ScanIssue(root, None, "Bad or unreadable zip file", str(error))],
+            )
+        write_scan_log(root, report)
+        return report
+
+    if not root.exists() or not root.is_dir():
+        report = ScanReport([], [])
+        write_scan_log(root, report)
+        return report
+
+    report = ScanReport(_scan_rechunk_folder(root), [])
+    write_scan_log(root, report)
+    return report
+
+
 def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
-    """Scan top-level .zip files, loose mod folders, or a selected SF6 install folder."""
+    """Scan a zip, top-level mod packages, or a selected SF6 data folder."""
     root = Path(folder)
+    if root.is_file() and root.suffix.lower() == ".zip":
+        try:
+            mods, issues = scan_zip_mods_with_issues(root)
+        except zipfile.BadZipFile as error:
+            report = ScanReport(
+                [],
+                [ScanIssue(root, None, "Bad or unreadable zip file", str(error))],
+            )
+            write_scan_log(root, report)
+            return report
+        report = ScanReport(sorted(mods, key=lambda mod: mod.mod_name.lower()), issues)
+        write_scan_log(root, report)
+        return report
+
     if not root.exists() or not root.is_dir():
         report = ScanReport([], [])
         write_scan_log(root, report)
@@ -51,7 +92,7 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
 
     mods: list[ScannedMod] = []
     issues: list[ScanIssue] = []
-    if _contains_direct_sf6_color_root(root):
+    if _contains_direct_sf6_color_root(root) or _contains_direct_natives_color_root(root):
         mods, issues = scan_folder_mods_with_issues(root)
         report = ScanReport(sorted(mods, key=lambda mod: mod.mod_name.lower()), issues)
         write_scan_log(root, report)
@@ -76,6 +117,118 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
     report = ScanReport(sorted(mods, key=lambda mod: mod.mod_name.lower()), issues)
     write_scan_log(root, report)
     return report
+
+
+def _scan_rechunk_zip(zip_path: Path) -> list[ScannedMod]:
+    with zipfile.ZipFile(zip_path) as archive:
+        entries = [
+            name.replace("\\", "/")
+            for name in archive.namelist()
+            if _is_rechunk_color_entry(name)
+        ]
+    return _mods_from_rechunk_color_entries(zip_path, "zip", entries)
+
+
+def _scan_rechunk_folder(folder_path: Path) -> list[ScannedMod]:
+    color_roots = _rechunk_folder_color_roots(folder_path)
+    entries: list[str] = []
+    for color_root in color_roots:
+        try:
+            character_dirs = [
+                path
+                for path in color_root.iterdir()
+                if path.is_dir() and path.name.lower().startswith("esf")
+            ]
+        except OSError:
+            continue
+        for character_dir in character_dirs:
+            try:
+                costume_dirs = [
+                    path
+                    for path in character_dir.iterdir()
+                    if path.is_dir() and path.name.isdigit()
+                ]
+            except OSError:
+                continue
+            for costume_dir in costume_dirs:
+                try:
+                    for file_path in costume_dir.iterdir():
+                        if file_path.is_file() and parse_color_filename(file_path.name):
+                            entries.append(file_path.relative_to(folder_path).as_posix())
+                except OSError:
+                    continue
+    return _mods_from_rechunk_color_entries(folder_path, "folder", entries)
+
+
+def _rechunk_folder_color_roots(folder_path: Path) -> list[Path]:
+    direct_root = folder_path.joinpath(*RECHUNK_COLOR_ROOT_PARTS)
+    if direct_root.is_dir():
+        return [direct_root]
+
+    roots: list[Path] = []
+    try:
+        for child in folder_path.iterdir():
+            if child.is_dir() and child.name.lower().startswith("re_chunk"):
+                color_root = child.joinpath(*RECHUNK_COLOR_ROOT_PARTS)
+                if color_root.is_dir():
+                    roots.append(color_root)
+    except OSError:
+        return []
+    return roots
+
+
+def _is_rechunk_color_entry(name: str) -> bool:
+    normalized = name.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if not parse_color_filename(path.name):
+        return False
+    parts = tuple(part.lower() for part in path.parts)
+    root_index = _path_parts_index(parts, RECHUNK_COLOR_ROOT_PARTS)
+    if root_index is None:
+        return False
+    suffix = parts[root_index + len(RECHUNK_COLOR_ROOT_PARTS) :]
+    return (
+        len(suffix) == 3
+        and suffix[0].startswith("esf")
+        and suffix[1].isdigit()
+    )
+
+
+def _mods_from_rechunk_color_entries(
+    source_path: Path,
+    source_kind: str,
+    entries: list[str],
+) -> list[ScannedMod]:
+    parsed_files: list[tuple[str, ParsedColorFile]] = []
+    for entry in entries:
+        parsed = parse_color_filename(PurePosixPath(entry).name)
+        if parsed:
+            parsed_files.append((entry, parsed))
+    if not parsed_files:
+        return []
+
+    mod = ScannedMod(
+        zip_path=source_path,
+        mod_name=source_path.stem,
+        source_kind=source_kind,
+        description="Base CMD source",
+    )
+    mod.source_files = [
+        SourceColorFile(
+            zip_path=source_path,
+            mod_name=mod.mod_name,
+            author="",
+            preview_image_path_in_zip=None,
+            internal_file_path=entry,
+            character=parsed.character,
+            costume=parsed.costume,
+            type=parsed.type,
+            source_slot=parsed.slot,
+            source_kind=source_kind,
+        )
+        for entry, parsed in sorted(parsed_files, key=lambda item: item[0].lower())
+    ]
+    return [mod]
 
 
 def scan_zip(zip_path: str | Path) -> ScannedMod:
@@ -133,6 +286,11 @@ def scan_folder_mods_with_issues(folder_path: str | Path) -> tuple[list[ScannedM
 
 def _contains_direct_sf6_color_root(folder_path: Path) -> bool:
     color_root = folder_path.joinpath(*COLOR_FILE_PATH_PARTS)
+    return color_root.is_dir()
+
+
+def _contains_direct_natives_color_root(folder_path: Path) -> bool:
+    color_root = folder_path.joinpath(*NATIVES_COLOR_FILE_PATH_PARTS)
     return color_root.is_dir()
 
 
@@ -247,11 +405,25 @@ def _scan_package_entries(
 
 def _has_supported_color_file_structure(path: PurePosixPath) -> bool:
     parts = tuple(part.lower() for part in path.parts)
-    required_length = len(COLOR_FILE_PATH_PARTS)
-    return any(
-        parts[index : index + required_length] == COLOR_FILE_PATH_PARTS
-        for index in range(0, len(parts) - required_length + 1)
+    return _contains_path_parts(parts, COLOR_FILE_PATH_PARTS) or _contains_path_parts(
+        parts,
+        NATIVES_COLOR_FILE_PATH_PARTS,
     )
+
+
+def _contains_path_parts(parts: tuple[str, ...], required_parts: tuple[str, ...]) -> bool:
+    return _path_parts_index(parts, required_parts) is not None
+
+
+def _path_parts_index(
+    parts: tuple[str, ...],
+    required_parts: tuple[str, ...],
+) -> int | None:
+    required_length = len(required_parts)
+    for index in range(0, len(parts) - required_length + 1):
+        if parts[index : index + required_length] == required_parts:
+            return index
+    return None
 
 
 def _read_zip_modinfo(package_path: Path, name: str) -> tuple[dict[str, str], str]:

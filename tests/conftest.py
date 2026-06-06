@@ -20,6 +20,7 @@ def qt_app() -> QApplication:
 @pytest.fixture(autouse=True)
 def isolated_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings_module, "SETTINGS_PATH", tmp_path / "settings.ini")
+    monkeypatch.setattr(settings_module, "SCAN_CACHE_PATH", tmp_path / "scan_cache.json")
     settings = settings_module.AppSettings()
     settings._settings.setValue("updates/check_on_startup", False)
     settings.set_last_shown_changes_version(settings_module.APP_VERSION)

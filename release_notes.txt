@@ -1,3 +1,6 @@
 Recent changes:
-- Selecting the game folder (steamapps\common\Street Fighter 6\ or what ever) as mod folder will scan the natives folder (and re_chunk_000 folder if you have it there)
-- In actuality, any folder that directly contains "natives/stm/product/model/esf" can be scanned
+- Rebuilt the source section so you can quickly switch between the mod folder, natives folder, and re_chunk folder/CMD pack.zip (or whichever folder/zip you want).
+- Optimized startup and loading the mod list images.
+- Added a scan button for manual re-scan.
+- Search bar can now filter characters, costumes, and slots, not just mod name, author, zip file name.
+  (You can do search/filter like "aki costume 1 slot 2" or "aki c2 dx1")

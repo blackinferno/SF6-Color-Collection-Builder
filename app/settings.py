@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 
 APP_NAME = "SF6 Color Collection Builder"
-APP_VERSION = "0.1.7"
+APP_VERSION = "0.1.8"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 APP_DATA_ROOT = (
@@ -17,6 +17,7 @@ APP_DATA_ROOT = (
 )
 SETTINGS_PATH = APP_DATA_ROOT / "settings.ini"
 SCAN_LOG_PATH = APP_DATA_ROOT / "scan.log"
+SCAN_CACHE_PATH = APP_DATA_ROOT / "scan_cache.json"
 RELEASE_NOTES_PATH = APP_DATA_ROOT / "release_notes.txt"
 APP_ICON_PATH = PROJECT_ROOT / "img" / "colormixer.png"
 GITHUB_RELEASES_API_URL = (
@@ -45,6 +46,23 @@ class AppSettings:
 
     def set_last_mods_folder(self, folder: str | Path) -> None:
         self._settings.setValue("paths/last_mods_folder", str(folder))
+
+    def scan_source_folder(self, source_key: str) -> str:
+        if source_key == "mods":
+            return self.last_mods_folder()
+        return str(self._settings.value(f"paths/{source_key}_folder", "", str))
+
+    def set_scan_source_folder(self, source_key: str, folder: str | Path) -> None:
+        if source_key == "mods":
+            self.set_last_mods_folder(folder)
+            return
+        self._settings.setValue(f"paths/{source_key}_folder", str(folder))
+
+    def selected_scan_source(self) -> str:
+        return str(self._settings.value("scan/selected_source", "mods", str))
+
+    def set_selected_scan_source(self, source_key: str) -> None:
+        self._settings.setValue("scan/selected_source", source_key)
 
     def last_project_folder(self) -> str:
         return str(self._settings.value("paths/last_project_folder", "", str))

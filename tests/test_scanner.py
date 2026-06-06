@@ -3,7 +3,13 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from app.scanner import scan_mods_folder, scan_mods_folder_with_report, scan_zip, write_scan_log
+from app.scanner import (
+    scan_mods_folder,
+    scan_mods_folder_with_report,
+    scan_rechunk_source_with_report,
+    scan_zip,
+    write_scan_log,
+)
 
 
 COLOR_ROOT = "natives/stm/product/model/esf"
@@ -68,6 +74,26 @@ def test_scan_mods_folder_only_scans_top_level_zips(tmp_path: Path) -> None:
     assert mods[0].source_files[0].source_slot == "010"
 
 
+def test_scan_mods_folder_accepts_direct_zip_path(tmp_path: Path) -> None:
+    zip_path = tmp_path / "BaseCmds.zip"
+    _write_zip(
+        zip_path,
+        {
+            "modinfo.ini": "name=Base CMDs\n",
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mods = scan_mods_folder(zip_path)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "Base CMDs"
+    assert mods[0].source_kind == "zip"
+    assert mods[0].source_files[0].internal_file_path == (
+        f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2"
+    )
+
+
 def test_scan_mods_folder_scans_top_level_loose_folders(tmp_path: Path) -> None:
     loose = tmp_path / "LooseMod"
     _write_folder(
@@ -110,6 +136,65 @@ def test_scan_mods_folder_scans_selected_street_fighter_install_folder(
     assert mods[0].source_files[0].internal_file_path == (
         f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2"
     )
+
+
+def test_scan_mods_folder_scans_selected_natives_folder_from_stm(
+    tmp_path: Path,
+) -> None:
+    natives_folder = tmp_path / "natives"
+    _write_folder(
+        natives_folder,
+        {
+            "stm/product/model/esf/esf001/001/esf001_001_cmd_002.user.2": b"game color",
+        },
+    )
+
+    mods = scan_mods_folder(natives_folder)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "natives"
+    assert mods[0].source_files[0].internal_file_path == (
+        "stm/product/model/esf/esf001/001/esf001_001_cmd_002.user.2"
+    )
+
+
+def test_scan_rechunk_folder_only_checks_direct_cmd_costume_folders(
+    tmp_path: Path,
+) -> None:
+    _write_folder(
+        tmp_path,
+        {
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/deeper/esf001_001_cmd_003.user.2": b"ignored",
+            "somewhere_else/esf001_001_cmd_004.user.2": b"ignored",
+        },
+    )
+
+    report = scan_rechunk_source_with_report(tmp_path)
+
+    assert len(report.mods) == 1
+    assert report.mods[0].mod_name == tmp_path.stem
+    assert [source.source_slot for source in report.mods[0].source_files] == ["002"]
+    assert report.mods[0].source_files[0].source_kind == "folder"
+
+
+def test_scan_rechunk_zip_only_accepts_expected_cmd_path(tmp_path: Path) -> None:
+    zip_path = tmp_path / "BaseCmds.zip"
+    _write_zip(
+        zip_path,
+        {
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/deeper/esf001_001_cmd_003.user.2": b"ignored",
+            "unrelated/esf001_001_cmd_004.user.2": b"ignored",
+        },
+    )
+
+    report = scan_rechunk_source_with_report(zip_path)
+
+    assert len(report.mods) == 1
+    assert report.mods[0].mod_name == "BaseCmds"
+    assert [source.source_slot for source in report.mods[0].source_files] == ["002"]
+    assert report.mods[0].source_files[0].source_kind == "zip"
 
 
 def test_scan_mods_folder_excludes_zips_without_supported_color_files(tmp_path: Path) -> None:

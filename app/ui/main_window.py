@@ -3,9 +3,10 @@ from __future__ import annotations
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -17,7 +18,6 @@ from PySide6.QtWidgets import (
     QSizeGrip,
     QSizePolicy,
     QStatusBar,
-    QDialog,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,7 +32,12 @@ from app.characters import CHARACTER_NAMES, character_label
 from app.exporter import export_collection_zip
 from app.models import CollectionAssignment, ScannedMod
 from app.project_io import load_exported_collection_zip
-from app.scanner import scan_mods_folder_with_report
+from app.scanner import (
+    ScanReport,
+    scan_mods_folder_with_report,
+    scan_rechunk_source_with_report,
+)
+from app.scan_cache import clear_scan_cache, load_scan_cache, save_scan_cache
 from app.settings import (
     APP_ICON_PATH,
     APP_NAME,
@@ -69,6 +74,13 @@ class MainWindow(QMainWindow):
         self.current_output_path: Path | None = None
         self.update_thread: QThread | None = None
         self.update_worker: UpdateCheckWorker | None = None
+        self.scan_thread: QThread | None = None
+        self.scan_worker: ScanWorker | None = None
+        self.scan_source_key = "mods"
+        self.mods_by_source: dict[str, list[ScannedMod]] = {
+            key: [] for key, _label in ModList.SOURCES
+        }
+        self.scanned_sources_this_session: set[str] = set()
         self.collection_name = "Custom Collection"
         self.assignments: dict[tuple[str, str, str, str], CollectionAssignment] = {}
 
@@ -98,8 +110,10 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._connect_signals()
         self._apply_styles()
+        self.mod_list.set_current_source(self.settings.selected_scan_source())
+        self.scan_source_key = self.mod_list.current_source_key
         self._refresh_columns()
-        self._scan_last_mods_folder()
+        QTimer.singleShot(0, self._scan_current_source_on_startup)
         self._show_version_changes_once()
         self._check_for_updates_on_startup()
 
@@ -150,8 +164,12 @@ class MainWindow(QMainWindow):
         action_toolbar.setMovable(False)
         action_toolbar.setIconSize(QSize(28, 28))
 
-        scan_button = QPushButton("Scan Mods Folder")
-        scan_button.clicked.connect(self._choose_folder)
+        select_folder_button = QPushButton("Select Folder")
+        select_folder_button.clicked.connect(self._choose_folder)
+        action_toolbar.addWidget(select_folder_button)
+
+        scan_button = QPushButton("Scan")
+        scan_button.clicked.connect(self._rescan_current_folder)
         action_toolbar.addWidget(scan_button)
 
         left_spacer = QWidget()
@@ -204,6 +222,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.mod_list.selected.connect(self._select_mod)
+        self.mod_list.source_changed.connect(self._select_scan_source)
         self.character_column.selected.connect(self._select_character)
         self.costume_column.selected.connect(self._select_costume)
         self.slot_column.type_changed.connect(self._select_type)
@@ -510,41 +529,79 @@ class MainWindow(QMainWindow):
             """)
 
     def _choose_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select SF6 Mods Folder",
-            self.settings.last_mods_folder(),
-        )
-        if not folder:
+        source_key = self.mod_list.current_source_key
+        selected_path = self._choose_scan_path(source_key)
+        if not selected_path:
             return
-        self.settings.set_last_mods_folder(folder)
-        self._scan_folder(Path(folder))
+        self.settings.set_scan_source_folder(source_key, selected_path)
+        self.scanned_sources_this_session.discard(source_key)
+        clear_scan_cache(source_key)
+        self._start_scan_folder(Path(selected_path), source_key)
 
-    def _scan_last_mods_folder(self) -> None:
-        last_folder = self.settings.last_mods_folder()
-        if last_folder and Path(last_folder).is_dir():
-            self._scan_folder(Path(last_folder))
-
-    def _scan_folder(self, folder: Path) -> None:
-        self.statusBar().showMessage("Scanning zip mods...")
-        try:
-            report = scan_mods_folder_with_report(folder)
-            self.mods = report.mods
-        except Exception as error:
-            self.settings.set_last_mods_folder("")
-            self.mods = []
-            self.mod_list.set_mods(self.mods)
-            self.mod_list.show_preview(None)
-            self.selected_mod = None
-            self.selected_character = None
-            self.selected_costume = None
-            self.selected_source_slot = None
-            self._refresh_columns()
+    def _rescan_current_folder(self) -> None:
+        source_key = self.mod_list.current_source_key
+        folder = self.settings.scan_source_folder(source_key)
+        if not folder or not self._is_valid_scan_path(source_key, Path(folder)):
             self.statusBar().showMessage(
-                f"Scan failed. Cleared remembered mods folder: {error}",
-                8000,
+                f"Select a {self._scan_source_label(source_key)} source first.",
+                4000,
             )
             return
+        self._start_scan_folder(Path(folder), source_key)
+
+    def _scan_last_mods_folder(self) -> None:
+        last_folder = self.settings.scan_source_folder(self.scan_source_key)
+        if last_folder and self._is_valid_scan_path(self.scan_source_key, Path(last_folder)):
+            self._scan_folder(Path(last_folder), self.scan_source_key)
+
+    def _scan_current_source_on_startup(self) -> None:
+        self._load_source_from_cache_then_scan_once(self.scan_source_key)
+
+    def _start_scan_folder(self, folder: Path, source_key: str) -> None:
+        if self.scan_thread is not None:
+            self.statusBar().showMessage("Already scanning. Please wait.", 3000)
+            return
+        self.statusBar().showMessage(f"Loading {self._scan_source_label(source_key)}...")
+        QApplication.processEvents()
+        self.scan_thread = QThread(self)
+        self.scan_worker = ScanWorker(folder, source_key)
+        self.scan_worker.moveToThread(self.scan_thread)
+        self.scan_thread.started.connect(self.scan_worker.run)
+        self.scan_worker.succeeded.connect(self._scan_finished)
+        self.scan_worker.failed.connect(self._scan_failed)
+        self.scan_worker.finished.connect(self.scan_thread.quit)
+        self.scan_worker.finished.connect(self.scan_worker.deleteLater)
+        self.scan_thread.finished.connect(self.scan_thread.deleteLater)
+        self.scan_thread.finished.connect(self._clear_scan_worker)
+        self.scan_thread.start()
+
+    def _scan_folder(self, folder: Path, source_key: str = "mods") -> None:
+        self.statusBar().showMessage(f"Loading {self._scan_source_label(source_key)}...")
+        try:
+            report = self._scan_source_with_report(folder, source_key)
+        except Exception as error:
+            self._handle_scan_failure(source_key, str(error))
+            return
+        self._apply_scan_report(source_key, folder, report)
+
+    def _scan_source_with_report(self, folder: Path, source_key: str) -> ScanReport:
+        if source_key == "rechunk":
+            return scan_rechunk_source_with_report(folder)
+        return scan_mods_folder_with_report(folder)
+
+    def _scan_finished(self, source_key: str, folder: Path, report: ScanReport) -> None:
+        self._apply_scan_report(source_key, folder, report)
+
+    def _scan_failed(self, source_key: str, error: str) -> None:
+        self._handle_scan_failure(source_key, error)
+
+    def _apply_scan_report(self, source_key: str, folder: Path, report: ScanReport) -> None:
+        self.mods_by_source[source_key] = report.mods
+        self.scanned_sources_this_session.add(source_key)
+        save_scan_cache(source_key, folder, report.mods)
+        if source_key != self.scan_source_key:
+            return
+        self.mods = report.mods
         self.mod_list.set_mods(self.mods)
         self.mod_list.show_preview(None)
         self.selected_mod = None
@@ -564,6 +621,126 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Found {len(self.mods)} mods with supported data.", 5000
             )
+
+    def _handle_scan_failure(self, source_key: str, error: str) -> None:
+        self.settings.set_scan_source_folder(source_key, "")
+        self.mods_by_source[source_key] = []
+        self.scanned_sources_this_session.discard(source_key)
+        clear_scan_cache(source_key)
+        if source_key == self.scan_source_key:
+            self.mods = []
+            self.mod_list.set_mods(self.mods)
+            self.mod_list.show_preview(None)
+            self.selected_mod = None
+            self.selected_character = None
+            self.selected_costume = None
+            self.selected_source_slot = None
+            self._refresh_columns()
+        self.statusBar().showMessage(
+            f"Scan failed. Cleared remembered {self._scan_source_label(source_key)} folder: {error}",
+            8000,
+        )
+
+    def _clear_scan_worker(self) -> None:
+        self.scan_thread = None
+        self.scan_worker = None
+
+    def _select_scan_source(self, source_key: str) -> None:
+        self.scan_source_key = source_key
+        self.settings.set_selected_scan_source(source_key)
+        self._load_source_from_cache_then_scan_once(source_key)
+
+    def _load_source_from_cache_then_scan_once(self, source_key: str) -> None:
+        folder_text = self.settings.scan_source_folder(source_key)
+        folder = Path(folder_text) if folder_text else None
+        if (
+            folder
+            and self._is_valid_scan_path(source_key, folder)
+            and not self.mods_by_source.get(source_key)
+        ):
+            cached_mods = load_scan_cache(source_key, folder)
+            if cached_mods:
+                self.mods_by_source[source_key] = cached_mods
+
+        self.mods = self.mods_by_source.get(source_key, [])
+        self.mod_list.set_mods(self.mods)
+        self.mod_list.show_preview(None)
+        self.selected_mod = None
+        self.selected_character = None
+        self.selected_costume = None
+        self.selected_source_slot = None
+        self._refresh_columns()
+
+        if (
+            folder
+            and self._is_valid_scan_path(source_key, folder)
+            and source_key not in self.scanned_sources_this_session
+        ):
+            if self.mods:
+                self.statusBar().showMessage(
+                    (
+                        f"Showing cached {self._scan_source_label(source_key)} data. "
+                        "Refreshing..."
+                    ),
+                    4000,
+                )
+            self._start_scan_folder(folder, source_key)
+        elif self.mods:
+            self.statusBar().showMessage(
+                f"Showing {len(self.mods)} mods from {self._scan_source_label(source_key)}.",
+                3000,
+            )
+        elif folder and self._is_valid_scan_path(source_key, folder):
+            self.statusBar().showMessage(
+                f"{self._scan_source_label(source_key)} folder selected. Press Scan to load.",
+                4000,
+            )
+
+    def _choose_scan_path(self, source_key: str) -> str:
+        if source_key == "rechunk":
+            return self._choose_rechunk_path()
+        return QFileDialog.getExistingDirectory(
+            self,
+            self._scan_folder_dialog_title(source_key),
+            self.settings.scan_source_folder(source_key),
+        )
+
+    def _choose_rechunk_path(self) -> str:
+        dialog = QFileDialog(
+            self,
+            self._scan_folder_dialog_title("rechunk"),
+            self.settings.scan_source_folder("rechunk"),
+            "Zip Files (*.zip);;All Files (*)",
+        )
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setAcceptMode(QFileDialog.AcceptOpen)
+        dialog.setFileMode(QFileDialog.AnyFile)
+        dialog.setNameFilter("Zip Files (*.zip)")
+        if dialog.exec() != QDialog.Accepted:
+            return ""
+        selected = dialog.selectedFiles()
+        if not selected:
+            return ""
+        path = Path(selected[0])
+        if self._is_valid_scan_path("rechunk", path):
+            return str(path)
+        QMessageBox.warning(
+            self,
+            APP_NAME,
+            "Select a re_chunk folder or a .zip file.",
+        )
+        return ""
+
+    def _is_valid_scan_path(self, source_key: str, path: Path) -> bool:
+        if path.is_dir():
+            return True
+        return source_key == "rechunk" and path.is_file() and path.suffix.lower() == ".zip"
+
+    def _scan_source_label(self, source_key: str) -> str:
+        return dict(ModList.SOURCES).get(source_key, "Mod Folder")
+
+    def _scan_folder_dialog_title(self, source_key: str) -> str:
+        return f"Select {self._scan_source_label(source_key)}"
 
     def _select_mod(self, index: int) -> None:
         self.selected_mod = self.mods[index]
@@ -1282,6 +1459,29 @@ class MainWindow(QMainWindow):
     def _clear_update_worker(self) -> None:
         self.update_thread = None
         self.update_worker = None
+
+
+class ScanWorker(QObject):
+    succeeded = Signal(str, Path, object)
+    failed = Signal(str, str)
+    finished = Signal()
+
+    def __init__(self, folder: Path, source_key: str) -> None:
+        super().__init__()
+        self.folder = folder
+        self.source_key = source_key
+
+    def run(self) -> None:
+        try:
+            if self.source_key == "rechunk":
+                report = scan_rechunk_source_with_report(self.folder)
+            else:
+                report = scan_mods_folder_with_report(self.folder)
+            self.succeeded.emit(self.source_key, self.folder, report)
+        except Exception as error:
+            self.failed.emit(self.source_key, str(error))
+        finally:
+            self.finished.emit()
 
 
 class UpdateCheckWorker(QObject):

@@ -5,14 +5,17 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QMessageBox
 
 from app.characters import CHARACTER_NAMES
+from app.models import ScannedMod, SourceColorFile
 from app.settings import APP_VERSION
 from app.scanner import scan_zip
 from app.scanner import ScanIssue, ScanReport
 from app.ui.batch_assign_dialog import BatchAssignDialog
 from app.ui.main_window import MainWindow
+from app.ui.mod_list import ModList
 
 
 COLOR_ROOT = "natives/stm/product/model/esf"
@@ -351,16 +354,16 @@ def test_scan_folder_failure_clears_remembered_mods_folder(
     monkeypatch,
 ) -> None:
     window = MainWindow()
-    window.settings.set_last_mods_folder(tmp_path)
+    window.settings.set_scan_source_folder("natives", tmp_path)
 
     def fail_scan(_folder):
         raise RuntimeError("bad zip")
 
     monkeypatch.setattr("app.ui.main_window.scan_mods_folder_with_report", fail_scan)
 
-    window._scan_folder(tmp_path)
+    window._scan_folder(tmp_path, "natives")
 
-    assert window.settings.last_mods_folder() == ""
+    assert window.settings.scan_source_folder("natives") == ""
     assert window.mods == []
 
 
@@ -381,10 +384,175 @@ def test_scan_folder_reports_scan_issues_in_status(
         lambda _folder: ScanReport([], [issue]),
     )
 
-    window._scan_folder(tmp_path)
+    window._scan_folder(tmp_path, "mods")
 
     assert "1 scan issues written to scan.log" in window.statusBar().currentMessage()
     assert "Broken.zip / modinfo.ini" in window.statusBar().currentMessage()
+
+
+def test_switching_mod_source_tabs_uses_cached_mods(qt_app: QApplication) -> None:
+    window = MainWindow()
+    first_mod = ScannedMod(zip_path=Path("Cached.zip"), mod_name="Cached Mod")
+    window.mods_by_source["natives"] = [first_mod]
+
+    window.mod_list.set_current_source("natives")
+
+    assert window.scan_source_key == "natives"
+    assert window.settings.selected_scan_source() == "natives"
+    assert window.mods == [first_mod]
+    assert window.mod_list.source_tabs.count() == 3
+
+
+def test_switching_source_tab_autoscans_first_visit(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    window.settings.set_scan_source_folder("rechunk", tmp_path)
+    calls: list[tuple[Path, str]] = []
+
+    monkeypatch.setattr(
+        window,
+        "_start_scan_folder",
+        lambda folder, source_key: calls.append((folder, source_key)),
+    )
+
+    window.mod_list.set_current_source("rechunk")
+
+    assert calls == [(tmp_path, "rechunk")]
+
+
+def test_rechunk_source_tab_autoscans_remembered_zip(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    zip_path = tmp_path / "BaseCmds.zip"
+    zip_path.write_bytes(b"not read in this test")
+    window = MainWindow()
+    window.settings.set_scan_source_folder("rechunk", zip_path)
+    calls: list[tuple[Path, str]] = []
+
+    monkeypatch.setattr(
+        window,
+        "_start_scan_folder",
+        lambda folder, source_key: calls.append((folder, source_key)),
+    )
+
+    window.mod_list.set_current_source("rechunk")
+
+    assert calls == [(zip_path, "rechunk")]
+
+
+def test_switching_source_tab_shows_disk_cache_then_autoscans_first_visit(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    cached_mod = ScannedMod(zip_path=tmp_path / "Cached.zip", mod_name="Cached Mod")
+    window.settings.set_scan_source_folder("rechunk", tmp_path)
+    calls: list[tuple[Path, str]] = []
+
+    monkeypatch.setattr(
+        "app.ui.main_window.load_scan_cache",
+        lambda source_key, folder: [cached_mod],
+    )
+    monkeypatch.setattr(
+        window,
+        "_start_scan_folder",
+        lambda folder, source_key: calls.append((folder, source_key)),
+    )
+
+    window.mod_list.set_current_source("rechunk")
+
+    assert window.mods == [cached_mod]
+    assert calls == [(tmp_path, "rechunk")]
+    assert "Showing cached re_chunk / ZIP data" in window.statusBar().currentMessage()
+
+
+def test_switching_source_tab_does_not_rescan_after_session_refresh(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    window.settings.set_scan_source_folder("rechunk", tmp_path)
+    window.scanned_sources_this_session.add("rechunk")
+    calls: list[tuple[Path, str]] = []
+
+    monkeypatch.setattr(
+        window,
+        "_start_scan_folder",
+        lambda folder, source_key: calls.append((folder, source_key)),
+    )
+
+    window.mod_list.set_current_source("rechunk")
+
+    assert calls == []
+    assert "Press Scan to load" in window.statusBar().currentMessage()
+
+
+def test_mod_list_queues_preview_loading_without_blocking(qt_app: QApplication) -> None:
+    mod_list = ModList()
+    mod = ScannedMod(
+        zip_path=Path("Preview.zip"),
+        mod_name="Preview Mod",
+        preview_image_path_in_zip="preview.png",
+    )
+
+    mod_list.set_mods([mod])
+
+    assert mod_list.list_widget.count() == 1
+    assert len(mod_list._preview_queue) == 1
+    assert not mod_list._has_cached_preview(mod)
+
+
+def test_mod_list_search_matches_character_costume_and_slot_tokens(
+    qt_app: QApplication,
+) -> None:
+    mod_list = ModList()
+    aki_mod = ScannedMod(zip_path=Path("BaseCmds.zip"), mod_name="Base CMDs")
+    aki_mod.source_files = [
+        SourceColorFile(
+            zip_path=Path("BaseCmds.zip"),
+            mod_name="Base CMDs",
+            author="",
+            preview_image_path_in_zip=None,
+            internal_file_path="natives/stm/product/model/esf/esf013/001/esf013_001_cmd_dx_001.user.2",
+            character="esf013",
+            costume="001",
+            type="dx",
+            source_slot="001",
+        )
+    ]
+    ryu_mod = ScannedMod(zip_path=Path("Ryu.zip"), mod_name="Ryu CMDs")
+    ryu_mod.source_files = [
+        SourceColorFile(
+            zip_path=Path("Ryu.zip"),
+            mod_name="Ryu CMDs",
+            author="",
+            preview_image_path_in_zip=None,
+            internal_file_path="natives/stm/product/model/esf/esf001/002/esf001_002_cmd_ex_003.user.2",
+            character="esf001",
+            costume="002",
+            type="ex",
+            source_slot="003",
+        )
+    ]
+    mod_list.set_mods([aki_mod, ryu_mod])
+
+    for query in ("AKI", "A.K.I.", "costume 1", "c1", "outfit 1", "dx1", "aki 01"):
+        mod_list.search.setText(query)
+        assert mod_list.list_widget.count() == 1
+        row = mod_list.list_widget.itemWidget(mod_list.list_widget.item(0))
+        assert any("Base CMDs" in label.text() for label in row.findChildren(QLabel))
+
+    mod_list.search.setText("ex3")
+    assert mod_list.list_widget.count() == 1
+    row = mod_list.list_widget.itemWidget(mod_list.list_widget.item(0))
+    assert any("Ryu CMDs" in label.text() for label in row.findChildren(QLabel))
 
 
 def test_selecting_character_auto_selects_single_costume_and_dx_slot(

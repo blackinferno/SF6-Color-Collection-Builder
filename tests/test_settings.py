@@ -33,3 +33,16 @@ def test_last_shown_changes_version_round_trips() -> None:
     settings.set_last_shown_changes_version("0.1.3")
 
     assert settings.last_shown_changes_version() == "0.1.3"
+
+
+def test_scan_source_folders_round_trip() -> None:
+    settings = AppSettings()
+
+    settings.set_scan_source_folder("mods", "C:/Mods")
+    settings.set_scan_source_folder("natives", "C:/Game/natives")
+    settings.set_selected_scan_source("rechunk")
+
+    assert settings.scan_source_folder("mods") == "C:/Mods"
+    assert settings.last_mods_folder() == "C:/Mods"
+    assert settings.scan_source_folder("natives") == "C:/Game/natives"
+    assert settings.selected_scan_source() == "rechunk"

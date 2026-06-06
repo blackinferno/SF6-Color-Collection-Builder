@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import zipfile
 
-from PySide6.QtCore import QSize, Signal, Qt
+from PySide6.QtCore import QTimer, QSize, Signal, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -11,15 +11,24 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QTabBar,
     QVBoxLayout,
     QWidget,
 )
 
+from app.characters import character_label
 from app.models import ScannedMod
 
 
 class ModList(QWidget):
     selected = Signal(int)
+    source_changed = Signal(str)
+
+    SOURCES = (
+        ("mods", "Mod Folder"),
+        ("natives", "Natives"),
+        ("rechunk", "re_chunk / ZIP"),
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -27,27 +36,48 @@ class ModList(QWidget):
         self.mods: list[ScannedMod] = []
         self.title = QLabel("Mod List")
         self.title.setAlignment(Qt.AlignCenter)
+        self.source_tabs = QTabBar()
+        for source_key, label in self.SOURCES:
+            index = self.source_tabs.addTab(label)
+            self.source_tabs.setTabData(index, source_key)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter mods")
+        self.search.setPlaceholderText("Search")
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("modListWidget")
         self.list_widget.setFocusPolicy(Qt.NoFocus)
         self.list_widget.setUniformItemSizes(False)
         self._pixmap_cache: dict[str, QPixmap] = {}
+        self._placeholder_pixmap = QPixmap(112, 112)
+        self._placeholder_pixmap.fill(Qt.transparent)
+        self._preview_queue: list[tuple[QListWidgetItem, ScannedMod]] = []
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setInterval(0)
+        self._preview_timer.timeout.connect(self._load_next_preview)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 8)
         layout.setSpacing(10)
         layout.addWidget(self.title)
         layout.addWidget(self.search)
+        layout.addWidget(self.source_tabs)
         layout.addWidget(self.list_widget)
 
+        self.source_tabs.currentChanged.connect(self._emit_source_changed)
         self.search.textChanged.connect(self._render)
         self.list_widget.itemClicked.connect(self._emit_selected)
 
+    @property
+    def current_source_key(self) -> str:
+        return str(self.source_tabs.tabData(self.source_tabs.currentIndex()) or "mods")
+
+    def set_current_source(self, source_key: str) -> None:
+        for index in range(self.source_tabs.count()):
+            if self.source_tabs.tabData(index) == source_key:
+                self.source_tabs.setCurrentIndex(index)
+                return
+
     def set_mods(self, mods: list[ScannedMod]) -> None:
         self.mods = mods
-        self._pixmap_cache.clear()
         self._render()
 
     def show_preview(self, mod: ScannedMod | None) -> None:
@@ -61,25 +91,57 @@ class ModList(QWidget):
             selected_path = current.data(257)
 
         self.list_widget.clear()
+        self._preview_queue.clear()
+        self._preview_timer.stop()
         query = self.search.text().strip().lower()
         for index, mod in enumerate(self.mods):
-            haystack = f"{mod.mod_name} {mod.author} {mod.zip_path.name}".lower()
-            if query and query not in haystack:
+            haystack = _mod_search_text(mod)
+            if query and not _matches_search_query(query, haystack):
                 continue
             item = QListWidgetItem()
             item.setSizeHint(QSize(360, 132))
             item.setData(256, index)
             item.setData(257, str(mod.zip_path))
             self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, ModRow(mod, self._preview_pixmap(mod)))
+            row = ModRow(mod, self._cached_preview_pixmap(mod))
+            self.list_widget.setItemWidget(item, row)
+            if mod.preview_image_path_in_zip and not self._has_cached_preview(mod):
+                self._preview_queue.append((item, mod))
             if selected_path == str(mod.zip_path):
                 item.setSelected(True)
+        if self._preview_queue:
+            self._preview_timer.start()
 
     def _emit_selected(self, item: QListWidgetItem) -> None:
         self.selected.emit(item.data(256))
 
+    def _emit_source_changed(self, _index: int) -> None:
+        self.source_changed.emit(self.current_source_key)
+
+    def _cached_preview_pixmap(self, mod: ScannedMod) -> QPixmap:
+        cache_key = self._preview_cache_key(mod)
+        if cache_key in self._pixmap_cache:
+            return self._pixmap_cache[cache_key]
+        return self._placeholder_pixmap
+
+    def _has_cached_preview(self, mod: ScannedMod) -> bool:
+        return self._preview_cache_key(mod) in self._pixmap_cache
+
+    def _preview_cache_key(self, mod: ScannedMod) -> str:
+        return f"{mod.source_kind}|{mod.zip_path}|{mod.preview_image_path_in_zip}"
+
+    def _load_next_preview(self) -> None:
+        if not self._preview_queue:
+            self._preview_timer.stop()
+            return
+        item, mod = self._preview_queue.pop(0)
+        pixmap = self._preview_pixmap(mod)
+        row = self.list_widget.itemWidget(item)
+        if isinstance(row, ModRow):
+            row.set_preview(pixmap)
+
     def _preview_pixmap(self, mod: ScannedMod) -> QPixmap:
-        cache_key = f"{mod.zip_path}|{mod.preview_image_path_in_zip}"
+        cache_key = self._preview_cache_key(mod)
         if cache_key in self._pixmap_cache:
             return self._pixmap_cache[cache_key]
 
@@ -116,10 +178,11 @@ class ModRow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         preview_label = QLabel()
-        preview_label.setObjectName("modRowPreview")
-        preview_label.setFixedSize(112, 112)
-        preview_label.setAlignment(Qt.AlignCenter)
-        preview_label.setPixmap(preview)
+        self.preview_label = preview_label
+        self.preview_label.setObjectName("modRowPreview")
+        self.preview_label.setFixedSize(112, 112)
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setPixmap(preview)
 
         details = QGridLayout()
         details.setContentsMargins(0, 0, 0, 0)
@@ -142,8 +205,11 @@ class ModRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
-        layout.addWidget(preview_label)
+        layout.addWidget(self.preview_label)
         layout.addLayout(details, 1)
+
+    def set_preview(self, preview: QPixmap) -> None:
+        self.preview_label.setPixmap(preview)
 
     def _metadata_rows(self, mod: ScannedMod) -> list[tuple[str, str]]:
         rows = [
@@ -157,3 +223,89 @@ class ModRow(QWidget):
             if value:
                 rows.append((key.title(), value))
         return rows
+
+
+def _mod_search_text(mod: ScannedMod) -> str:
+    tokens = [
+        mod.mod_name,
+        mod.author,
+        mod.description,
+        mod.zip_path.name,
+        *mod.metadata.values(),
+    ]
+    for source in mod.source_files:
+        tokens.extend(
+            [
+                source.character,
+                character_label(source.character),
+                source.costume,
+                *costume_search_tokens(source.costume),
+                source.source_slot,
+                *slot_search_tokens(source.type, source.source_slot),
+            ]
+        )
+    return " ".join(str(token) for token in tokens if token).lower()
+
+
+def costume_search_tokens(costume: str) -> list[str]:
+    number = int(costume)
+    return [
+        f"costume {number}",
+        f"costume {number:02d}",
+        f"costume {number:03d}",
+        f"c{number}",
+        f"c{number:02d}",
+        f"outfit {number}",
+        f"outfit {number:02d}",
+        f"outfit {number:03d}",
+    ]
+
+
+def slot_search_tokens(color_type: str, slot: str) -> list[str]:
+    number = int(slot)
+    if color_type == "normal":
+        return [
+            f"{number:02d}",
+            f"{number:03d}",
+            f"slot {number}",
+            f"slot {number:02d}",
+            f"slot {number:03d}",
+            f"normal {number}",
+            f"normal {number:02d}",
+            f"normal {number:03d}",
+        ]
+    type_label = color_type.lower()
+    return [
+        f"{type_label}{number}",
+        f"{type_label}{number:02d}",
+        f"{type_label}{number:03d}",
+        f"{type_label} {number}",
+        f"{type_label} {number:02d}",
+        f"{type_label} {number:03d}",
+        f"slot {type_label}{number}",
+        f"slot {type_label}{number:02d}",
+        f"slot {type_label}{number:03d}",
+    ]
+
+
+def _compact_search_text(value: str) -> str:
+    return "".join(character for character in value.lower() if character.isalnum())
+
+
+def _matches_search_query(query: str, haystack: str) -> bool:
+    compact_haystack = _compact_search_text(haystack)
+    compact_tokens = {
+        _compact_search_text(token)
+        for token in haystack.split()
+        if _compact_search_text(token)
+    }
+    for term in query.split():
+        compact_term = _compact_search_text(term)
+        if not compact_term:
+            continue
+        if compact_term.isdigit() or len(compact_term) <= 2:
+            if compact_term not in compact_tokens:
+                return False
+        elif term not in haystack and compact_term not in compact_haystack:
+            return False
+    return True

@@ -16,5 +16,6 @@ release/
 
 settings.ini
 scan.log
+scan_cache.json
 
 *.log
