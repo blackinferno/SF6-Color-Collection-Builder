@@ -23,6 +23,7 @@ class CollectionColumn(QWidget):
     character_context_changed = Signal(str)
     costume_context_changed = Signal(str)
     show_summary_requested = Signal()
+    edit_info_requested = Signal()
 
     TYPE_BY_INDEX = {0: "normal", 1: "dx", 2: "ex"}
     INDEX_BY_TYPE = {value: key for key, value in TYPE_BY_INDEX.items()}
@@ -39,6 +40,7 @@ class CollectionColumn(QWidget):
         self.tabs = QTabWidget()
         self.slot_lists: dict[str, QListWidget] = {}
         self.summary_button = QPushButton("Show Current Collection")
+        self.edit_info_button = QPushButton("Edit Info")
 
         for label, color_type in (("Normal", "normal"), ("DX", "dx"), ("EX", "ex")):
             slot_list = QListWidget()
@@ -60,11 +62,17 @@ class CollectionColumn(QWidget):
         layout.addWidget(self.title)
         layout.addLayout(context_layout)
         layout.addWidget(self.tabs, 1)
-        layout.addWidget(self.summary_button)
+        action_layout = QHBoxLayout()
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
+        action_layout.addWidget(self.edit_info_button)
+        action_layout.addWidget(self.summary_button, 1)
+        layout.addLayout(action_layout)
 
         self.character_combo.currentIndexChanged.connect(self._emit_character_context)
         self.costume_combo.currentIndexChanged.connect(self._emit_costume_context)
         self.summary_button.clicked.connect(self.show_summary_requested)
+        self.edit_info_button.clicked.connect(self.edit_info_requested)
         self.refresh_all({}, source_type="normal", source_selected=False)
 
     def set_current_type(self, color_type: str) -> None:

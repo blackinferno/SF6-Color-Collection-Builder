@@ -7,6 +7,6 @@ python -m PyInstaller `
   app/main.py
 
 Copy-Item `
-  -LiteralPath "release_notes.txt" `
-  -Destination "dist/SF6 Color Collection Builder/release_notes.txt" `
+  -LiteralPath "update_log.txt" `
+  -Destination "dist/SF6 Color Collection Builder/update_log.txt" `
   -Force

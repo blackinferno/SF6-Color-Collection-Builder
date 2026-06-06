@@ -390,6 +390,35 @@ def test_scan_folder_reports_scan_issues_in_status(
     assert "Broken.zip / modinfo.ini" in window.statusBar().currentMessage()
 
 
+def test_natives_and_rechunk_scan_results_auto_select_first_mod(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    for source_key in ("natives", "rechunk"):
+        window = MainWindow()
+        first_mod = ScannedMod(zip_path=tmp_path / f"{source_key}.zip", mod_name="First")
+        second_mod = ScannedMod(zip_path=tmp_path / f"{source_key}2.zip", mod_name="Second")
+        window.scan_source_key = source_key
+
+        window._apply_scan_report(source_key, tmp_path, ScanReport([first_mod, second_mod], []))
+
+        assert window.selected_mod == first_mod
+        assert window.mod_list.list_widget.currentRow() == 0
+
+
+def test_mod_folder_scan_results_do_not_auto_select_first_mod(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow()
+    first_mod = ScannedMod(zip_path=tmp_path / "Mod.zip", mod_name="First")
+    window.scan_source_key = "mods"
+
+    window._apply_scan_report("mods", tmp_path, ScanReport([first_mod], []))
+
+    assert window.selected_mod is None
+
+
 def test_switching_mod_source_tabs_uses_cached_mods(qt_app: QApplication) -> None:
     window = MainWindow()
     first_mod = ScannedMod(zip_path=Path("Cached.zip"), mod_name="Cached Mod")
@@ -750,9 +779,13 @@ def test_version_changes_dialog_only_shows_once(
     window = MainWindow()
     window.settings.set_last_shown_changes_version("")
     calls: list[tuple[str, str]] = []
-    release_notes_path = tmp_path / "release_notes.txt"
-    release_notes_path.write_text("Editable update text", encoding="utf-8")
-    monkeypatch.setattr("app.ui.main_window.RELEASE_NOTES_PATH", release_notes_path)
+    update_log_path = tmp_path / "update_log.txt"
+    update_log_path.write_text(
+        "SF6 Color Collection Builder v0.1.8\nCurrent changes\n\n"
+        "SF6 Color Collection Builder v0.1.7\nOlder changes",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.ui.main_window.UPDATE_LOG_PATH", update_log_path)
 
     def record_message(_parent, title, message):
         calls.append((title, message))
@@ -765,7 +798,7 @@ def test_version_changes_dialog_only_shows_once(
 
     assert len(calls) == 1
     assert APP_VERSION in calls[0][0]
-    assert calls[0][1] == "Editable update text"
+    assert calls[0][1] == "SF6 Color Collection Builder v0.1.8\nCurrent changes"
     assert window.settings.last_shown_changes_version() == APP_VERSION
 
 
@@ -776,8 +809,40 @@ def test_version_changes_dialog_falls_back_to_default_message(
 ) -> None:
     window = MainWindow()
     monkeypatch.setattr(
-        "app.ui.main_window.RELEASE_NOTES_PATH",
-        tmp_path / "missing_release_notes.txt",
+        "app.ui.main_window.UPDATE_LOG_PATH",
+        tmp_path / "missing_update_log.txt",
     )
 
     assert "Recent changes:" in window._release_notes_message()
+
+
+def test_update_log_reads_local_file(
+    qt_app: QApplication,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow()
+    update_log_path = tmp_path / "update_log.txt"
+    update_log_path.write_text("v0.1.8\n- Source tabs", encoding="utf-8")
+    monkeypatch.setattr("app.ui.main_window.UPDATE_LOG_PATH", update_log_path)
+
+    assert window._update_log_message() == "v0.1.8\n- Source tabs"
+
+
+def test_release_notes_use_first_update_log_entry(
+    qt_app: QApplication,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow()
+    update_log_path = tmp_path / "update_log.txt"
+    update_log_path.write_text(
+        "SF6 Color Collection Builder v0.1.8\nNew changes\n\n"
+        "SF6 Color Collection Builder v0.1.7\nOld changes",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.ui.main_window.UPDATE_LOG_PATH", update_log_path)
+
+    assert window._release_notes_message() == (
+        "SF6 Color Collection Builder v0.1.8\nNew changes"
+    )

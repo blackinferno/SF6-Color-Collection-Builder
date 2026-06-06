@@ -1,0 +1,90 @@
+SF6 Color Collection Builder v0.1.9
+
+Recent changes:
+- Fixed a bug where re_chunk / CMD source selection pushed users toward ZIP files.
+- Added Edit Info button so you can change the mod/zip name, screenshot, and modinfo.ini text in the tool.
+- re_chunk / CMD sources now display mod info and screenshots when available.
+- Added an Update Log button.
+
+SF6 Color Collection Builder v0.1.8
+
+Recent changes:
+- Rebuilt the source section so you can quickly switch between the mod folder, natives folder, and re_chunk folder/CMD pack.zip.
+- Optimized startup and loading the mod list images.
+- Added a scan button for manual re-scan.
+- Search bar can now filter characters, costumes, and slots, not just mod name, author, or zip file name.
+- Example searches: "aki costume 1 slot 2" or "aki c2 dx1".
+
+SF6 Color Collection Builder v0.1.7
+
+Recent changes:
+- Selecting a Street Fighter 6 game folder can scan the natives folder. (Defunct in V.0.1.8)
+- Any folder that directly contains natives/stm/product/model/esf can be selected and scanned. 
+
+SF6 Color Collection Builder v0.1.6
+
+Recent changes:
+- When editing existing mods, mod information and images are no longer overwritten.
+- "*Edited by Color Collection Builder" is added to the mod description when a mod is edited for clarity.
+
+SF6 Color Collection Builder v0.1.5
+
+Recent changes:
+- Fixed a bug related to overwriting an existing custom collection zip.
+- Made the Show Current Collection window easier to navigate.
+
+SF6 Color Collection Builder v0.1.4
+
+Batch assignment update.
+
+Changes:
+- Added Batch Assign for assigning one selected source slot to one target slot across selected characters and costumes.
+- Supports Normal, DX, and EX source/target slot choices using the same assignment behavior as manual assignment.
+- Added character Select All and Unselect All controls in the batch dialog.
+
+SF6 Color Collection Builder v0.1.3
+
+Small usability update.
+
+Changes:
+- Shows a quick What's New message once after opening a new version.
+- Makes the auto-update prompt clear that the app will close and reopen automatically.
+- Adds extra character labels for esf100 entries.
+
+SF6 Color Collection Builder v0.1.2
+
+Feature release for scan diagnostics and loose folder support.
+
+Changes:
+- Scan immediate top-level loose mod folders in addition to zip files.
+- Recursively scan files inside each loose mod folder.
+- Keep SF6 color structure filtering with support for wrapper/submod folders.
+- Add structured scan issue reporting and local scan.log output beside the executable.
+- Show scan issue count and first affected package/path in the status bar.
+- Continue scanning valid mods when a zip, folder, or modinfo.ini has warnings.
+- Export colors assigned from loose folder sources.
+- Load previews from both zip packages and loose folders.
+
+SF6 Color Collection Builder v0.1.1
+
+Maintenance release for startup stability, scan filtering, and update support.
+
+Changes:
+- Added a portable auto-updater for future releases.
+- Moved settings from the Windows registry to local settings.ini beside the executable.
+- Prevented startup crash loops by clearing remembered mod folder on scan failure.
+- Hardened zip scanning against malformed modinfo.ini files, percent signs, bad zips, and loose/non-SF6 color files.
+- Require supported color files to be inside natives/stm/product/model/esf while still allowing submod wrapper folders.
+
+SF6 Color Collection Builder v0.1.0
+
+Initial public release.
+
+Features:
+- Scan SF6 color mod zip files.
+- Detect modinfo, preview images, characters, costumes, and normal/DX/EX color slots.
+- Assign source slots into a custom collection.
+- Save/export a Fluffy Mod Manager compatible collection zip.
+- Reopen app-created collection zips while preserving source mod names and original source slots.
+- Remember last folders and window size.
+- Includes GitHub update-check support.

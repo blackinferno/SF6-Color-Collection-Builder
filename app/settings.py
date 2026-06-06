@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 
 APP_NAME = "SF6 Color Collection Builder"
-APP_VERSION = "0.1.8"
+APP_VERSION = "0.1.9"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 APP_DATA_ROOT = (
@@ -18,7 +18,7 @@ APP_DATA_ROOT = (
 SETTINGS_PATH = APP_DATA_ROOT / "settings.ini"
 SCAN_LOG_PATH = APP_DATA_ROOT / "scan.log"
 SCAN_CACHE_PATH = APP_DATA_ROOT / "scan_cache.json"
-RELEASE_NOTES_PATH = APP_DATA_ROOT / "release_notes.txt"
+UPDATE_LOG_PATH = APP_DATA_ROOT / "update_log.txt"
 APP_ICON_PATH = PROJECT_ROOT / "img" / "colormixer.png"
 GITHUB_RELEASES_API_URL = (
     "https://api.github.com/repos/blackinferno/SF6-Color-Collection-Builder/releases/latest"

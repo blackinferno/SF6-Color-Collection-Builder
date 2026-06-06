@@ -7,13 +7,15 @@ from PySide6.QtCore import QObject, QThread, QTimer, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
-    QInputDialog,
+    QPlainTextEdit,
     QPushButton,
     QSizeGrip,
     QSizePolicy,
@@ -45,7 +47,7 @@ from app.settings import (
     GITHUB_RELEASES_API_URL,
     GITHUB_RELEASES_PAGE_URL,
     PROJECT_ROOT,
-    RELEASE_NOTES_PATH,
+    UPDATE_LOG_PATH,
     AppSettings,
 )
 from app.update_checker import UpdateInfo, check_latest_release
@@ -82,6 +84,10 @@ class MainWindow(QMainWindow):
         }
         self.scanned_sources_this_session: set[str] = set()
         self.collection_name = "Custom Collection"
+        self.collection_info_fields = self._default_collection_info_fields(
+            self.collection_name
+        )
+        self.collection_preview_path: Path | None = None
         self.assignments: dict[tuple[str, str, str, str], CollectionAssignment] = {}
 
         self.mods: list[ScannedMod] = []
@@ -131,6 +137,10 @@ class MainWindow(QMainWindow):
         donation_toolbar.setObjectName("donationToolbar")
         donation_toolbar.setMovable(False)
         donation_toolbar.setIconSize(QSize(28, 28))
+
+        update_log_button = QPushButton("Update Log")
+        update_log_button.clicked.connect(self._show_update_log)
+        donation_toolbar.addWidget(update_log_button)
 
         top_spacer = QWidget()
         top_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -234,6 +244,7 @@ class MainWindow(QMainWindow):
         self.collection_column.show_summary_requested.connect(
             self._show_current_collection
         )
+        self.collection_column.edit_info_requested.connect(self._edit_collection_info)
         self.collection_column.character_context_changed.connect(
             self._select_collection_character
         )
@@ -608,7 +619,11 @@ class MainWindow(QMainWindow):
         self.selected_character = None
         self.selected_costume = None
         self.selected_source_slot = None
-        self._refresh_columns()
+        if self._should_auto_select_source_mod(source_key):
+            self.mod_list.list_widget.setCurrentRow(0)
+            self._select_mod(0)
+        else:
+            self._refresh_columns()
         if report.issues:
             self.statusBar().showMessage(
                 (
@@ -669,7 +684,11 @@ class MainWindow(QMainWindow):
         self.selected_character = None
         self.selected_costume = None
         self.selected_source_slot = None
-        self._refresh_columns()
+        if self._should_auto_select_source_mod(source_key):
+            self.mod_list.list_widget.setCurrentRow(0)
+            self._select_mod(0)
+        else:
+            self._refresh_columns()
 
         if (
             folder
@@ -706,28 +725,64 @@ class MainWindow(QMainWindow):
         )
 
     def _choose_rechunk_path(self) -> str:
-        dialog = QFileDialog(
-            self,
-            self._scan_folder_dialog_title("rechunk"),
-            self.settings.scan_source_folder("rechunk"),
-            "Zip Files (*.zip);;All Files (*)",
-        )
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        dialog.setAcceptMode(QFileDialog.AcceptOpen)
-        dialog.setFileMode(QFileDialog.AnyFile)
-        dialog.setNameFilter("Zip Files (*.zip)")
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self._scan_folder_dialog_title("rechunk"))
+        dialog.resize(560, 120)
+
+        path_input = QLineEdit(self.settings.scan_source_folder("rechunk"))
+        path_input.setPlaceholderText("Select a re_chunk folder or Source CMD ZIP")
+
+        def browse_folder() -> None:
+            folder = QFileDialog.getExistingDirectory(
+                dialog,
+                "Select re_chunk Folder",
+                path_input.text(),
+            )
+            if folder:
+                path_input.setText(folder)
+
+        def browse_zip() -> None:
+            path, _selected_filter = QFileDialog.getOpenFileName(
+                dialog,
+                "Select re_chunk ZIP",
+                path_input.text(),
+                "Zip Files (*.zip)",
+            )
+            if path:
+                path_input.setText(path)
+
+        folder_button = QPushButton("Folder")
+        folder_button.clicked.connect(browse_folder)
+        zip_button = QPushButton("ZIP")
+        zip_button.clicked.connect(browse_zip)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(path_input, 1)
+        path_layout.addWidget(folder_button)
+        path_layout.addWidget(zip_button)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("re_chunk folder / Source CMD ZIP:"))
+        layout.addLayout(path_layout)
+        layout.addWidget(button_box)
+
         if dialog.exec() != QDialog.Accepted:
             return ""
-        selected = dialog.selectedFiles()
-        if not selected:
+
+        selected_path = path_input.text().strip()
+        if not selected_path:
             return ""
-        path = Path(selected[0])
+        path = Path(selected_path)
         if self._is_valid_scan_path("rechunk", path):
             return str(path)
         QMessageBox.warning(
             self,
             APP_NAME,
-            "Select a re_chunk folder or a .zip file.",
+            "Select a re_chunk folder or Source CMD ZIP.",
         )
         return ""
 
@@ -735,6 +790,9 @@ class MainWindow(QMainWindow):
         if path.is_dir():
             return True
         return source_key == "rechunk" and path.is_file() and path.suffix.lower() == ".zip"
+
+    def _should_auto_select_source_mod(self, source_key: str) -> bool:
+        return source_key in {"natives", "rechunk"} and bool(self.mods)
 
     def _scan_source_label(self, source_key: str) -> str:
         return dict(ModList.SOURCES).get(source_key, "Mod Folder")
@@ -1102,6 +1160,10 @@ class MainWindow(QMainWindow):
     def _new_project(self) -> None:
         self.current_output_path = None
         self.collection_name = "Custom Collection"
+        self.collection_info_fields = self._default_collection_info_fields(
+            self.collection_name
+        )
+        self.collection_preview_path = None
         self.assignments.clear()
         self.selected_character = None
         self.selected_costume = None
@@ -1123,6 +1185,10 @@ class MainWindow(QMainWindow):
             project_path
         )
         self.collection_name = collection_name
+        self.collection_info_fields = self._default_collection_info_fields(
+            self.collection_name
+        )
+        self.collection_preview_path = None
         self.assignments = {assignment.key: assignment for assignment in assignments}
         self.current_output_path = project_path
         self.settings.set_last_project_folder(project_path.parent)
@@ -1141,16 +1207,6 @@ class MainWindow(QMainWindow):
         self._export_to_path(self.current_output_path)
 
     def _save_project_as(self) -> None:
-        name, accepted = QInputDialog.getText(
-            self,
-            "Collection Name",
-            "Collection name:",
-            text=self.collection_name,
-        )
-        if not accepted or not name.strip():
-            return
-        self.collection_name = name.strip()
-
         default_path = Path(self.settings.last_project_folder()) / self._safe_filename(
             self.collection_name,
             ".zip",
@@ -1198,8 +1254,98 @@ class MainWindow(QMainWindow):
             self.collection_name,
             sorted(self.assignments.values(), key=lambda item: item.key),
             preserve_existing_metadata=output_path.exists(),
+            modinfo_fields=self.collection_info_fields,
+            preview_image_path=self.collection_preview_path,
         )
         self.statusBar().showMessage(f"Saved {output_path.name}.", 5000)
+
+    def _edit_collection_info(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Collection Info")
+        dialog.resize(620, 460)
+
+        name_input = QLineEdit(self.collection_name)
+        preview_input = QLineEdit(
+            str(self.collection_preview_path) if self.collection_preview_path else ""
+        )
+        preview_input.setPlaceholderText("Leave empty to use the default image")
+        fields_input = QPlainTextEdit(
+            self._format_collection_info_fields(self.collection_info_fields)
+        )
+        fields_input.setPlaceholderText("name=Custom Collection\nauthor=Marshial\nversion=1.0")
+
+        def browse_preview() -> None:
+            path, _selected_filter = QFileDialog.getOpenFileName(
+                dialog,
+                "Select Preview Image",
+                preview_input.text() or self.settings.last_project_folder(),
+                "Images (*.png *.jpg *.jpeg *.webp)",
+            )
+            if path:
+                preview_input.setText(path)
+
+        preview_button = QPushButton("Image")
+        preview_button.clicked.connect(browse_preview)
+
+        preview_layout = QHBoxLayout()
+        preview_layout.addWidget(preview_input, 1)
+        preview_layout.addWidget(preview_button)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Zip / mod name:"))
+        layout.addWidget(name_input)
+        layout.addWidget(QLabel("Preview image:"))
+        layout.addLayout(preview_layout)
+        layout.addWidget(QLabel("modinfo.ini fields:"))
+        layout.addWidget(fields_input, 1)
+        layout.addWidget(button_box)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        name = name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, APP_NAME, "Enter a zip / mod name.")
+            return
+
+        fields = self._parse_collection_info_fields(fields_input.toPlainText())
+        fields["name"] = name
+        preview_path = preview_input.text().strip()
+        if preview_path and not Path(preview_path).is_file():
+            QMessageBox.warning(self, APP_NAME, "Select an existing preview image.")
+            return
+
+        self.collection_name = name
+        self.collection_info_fields = fields
+        self.collection_preview_path = Path(preview_path) if preview_path else None
+        self.statusBar().showMessage("Updated collection info.", 3000)
+
+    def _default_collection_info_fields(self, collection_name: str) -> dict[str, str]:
+        return {
+            "name": collection_name,
+            "version": "1.0",
+            "description": "Generated by SF6 Color Collection Builder",
+            "screenshot": "MyCustomCollection.png",
+            "author": "Marshial",
+        }
+
+    def _format_collection_info_fields(self, fields: dict[str, str]) -> str:
+        return "\n".join(f"{key}={value}" for key, value in fields.items())
+
+    def _parse_collection_info_fields(self, text: str) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key, separator, value = stripped.partition("=")
+            if separator and key.strip():
+                fields[key.strip().lower()] = value.strip()
+        return fields
 
     def _show_current_collection(self) -> None:
         dialog = QDialog(self)
@@ -1376,11 +1522,37 @@ class MainWindow(QMainWindow):
         self.settings.set_last_shown_changes_version(APP_VERSION)
 
     def _release_notes_message(self) -> str:
+        return self._latest_update_log_entry() or CHANGE_LOG_MESSAGE
+
+    def _show_update_log(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Update Log")
+        dialog.resize(760, 620)
+
+        log_view = QPlainTextEdit(self._update_log_message())
+        log_view.setReadOnly(True)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(dialog.reject)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(log_view, 1)
+        layout.addWidget(button_box)
+        dialog.exec()
+
+    def _update_log_message(self) -> str:
         try:
-            message = RELEASE_NOTES_PATH.read_text(encoding="utf-8-sig").strip()
+            message = UPDATE_LOG_PATH.read_text(encoding="utf-8-sig").strip()
         except OSError:
             message = ""
         return message or CHANGE_LOG_MESSAGE
+
+    def _latest_update_log_entry(self) -> str:
+        message = self._update_log_message()
+        marker = "\nSF6 Color Collection Builder v"
+        if marker not in message:
+            return message
+        return message.split(marker, 1)[0].strip()
 
     def _check_for_updates_on_startup(self) -> None:
         if not self.settings.check_updates() or not GITHUB_RELEASES_API_URL:

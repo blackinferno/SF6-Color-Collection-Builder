@@ -48,8 +48,8 @@ def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
     root = Path(source)
     if root.is_file() and root.suffix.lower() == ".zip":
         try:
-            mods = _scan_rechunk_zip(root)
-            report = ScanReport(mods, [])
+            mods, issues = _scan_rechunk_zip(root)
+            report = ScanReport(mods, issues)
         except zipfile.BadZipFile as error:
             report = ScanReport(
                 [],
@@ -63,7 +63,8 @@ def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
         write_scan_log(root, report)
         return report
 
-    report = ScanReport(_scan_rechunk_folder(root), [])
+    mods, issues = _scan_rechunk_folder(root)
+    report = ScanReport(mods, issues)
     write_scan_log(root, report)
     return report
 
@@ -119,19 +120,24 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
     return report
 
 
-def _scan_rechunk_zip(zip_path: Path) -> list[ScannedMod]:
+def _scan_rechunk_zip(zip_path: Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
     with zipfile.ZipFile(zip_path) as archive:
         entries = [
             name.replace("\\", "/")
             for name in archive.namelist()
-            if _is_rechunk_color_entry(name)
+            if _is_rechunk_color_entry(name) or _is_rechunk_metadata_entry(name)
         ]
-    return _mods_from_rechunk_color_entries(zip_path, "zip", entries)
+    return _scan_package_entries(
+        package_path=zip_path,
+        source_kind="zip",
+        entries=entries,
+        read_modinfo=lambda path: _read_zip_modinfo(zip_path, path),
+    )
 
 
-def _scan_rechunk_folder(folder_path: Path) -> list[ScannedMod]:
+def _scan_rechunk_folder(folder_path: Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
     color_roots = _rechunk_folder_color_roots(folder_path)
-    entries: list[str] = []
+    entries = _rechunk_folder_metadata_entries(folder_path)
     for color_root in color_roots:
         try:
             character_dirs = [
@@ -157,7 +163,34 @@ def _scan_rechunk_folder(folder_path: Path) -> list[ScannedMod]:
                             entries.append(file_path.relative_to(folder_path).as_posix())
                 except OSError:
                     continue
-    return _mods_from_rechunk_color_entries(folder_path, "folder", entries)
+    return _scan_package_entries(
+        package_path=folder_path,
+        source_kind="folder",
+        entries=entries,
+        read_modinfo=lambda path: _read_folder_modinfo(folder_path, path),
+    )
+
+
+def _rechunk_folder_metadata_entries(folder_path: Path) -> list[str]:
+    entries: list[str] = []
+    candidates = [folder_path]
+    try:
+        candidates.extend(
+            child
+            for child in folder_path.iterdir()
+            if child.is_dir() and child.name.lower().startswith("re_chunk")
+        )
+    except OSError:
+        return entries
+
+    for candidate in candidates:
+        try:
+            for file_path in candidate.iterdir():
+                if file_path.is_file() and _is_rechunk_metadata_entry(file_path.name):
+                    entries.append(file_path.relative_to(folder_path).as_posix())
+        except OSError:
+            continue
+    return entries
 
 
 def _rechunk_folder_color_roots(folder_path: Path) -> list[Path]:
@@ -194,41 +227,9 @@ def _is_rechunk_color_entry(name: str) -> bool:
     )
 
 
-def _mods_from_rechunk_color_entries(
-    source_path: Path,
-    source_kind: str,
-    entries: list[str],
-) -> list[ScannedMod]:
-    parsed_files: list[tuple[str, ParsedColorFile]] = []
-    for entry in entries:
-        parsed = parse_color_filename(PurePosixPath(entry).name)
-        if parsed:
-            parsed_files.append((entry, parsed))
-    if not parsed_files:
-        return []
-
-    mod = ScannedMod(
-        zip_path=source_path,
-        mod_name=source_path.stem,
-        source_kind=source_kind,
-        description="Base CMD source",
-    )
-    mod.source_files = [
-        SourceColorFile(
-            zip_path=source_path,
-            mod_name=mod.mod_name,
-            author="",
-            preview_image_path_in_zip=None,
-            internal_file_path=entry,
-            character=parsed.character,
-            costume=parsed.costume,
-            type=parsed.type,
-            source_slot=parsed.slot,
-            source_kind=source_kind,
-        )
-        for entry, parsed in sorted(parsed_files, key=lambda item: item[0].lower())
-    ]
-    return [mod]
+def _is_rechunk_metadata_entry(name: str) -> bool:
+    path = PurePosixPath(name.replace("\\", "/"))
+    return path.name.lower() == "modinfo.ini" or path.suffix.lower() in IMAGE_SUFFIXES
 
 
 def scan_zip(zip_path: str | Path) -> ScannedMod:

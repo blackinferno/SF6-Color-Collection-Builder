@@ -197,6 +197,45 @@ def test_scan_rechunk_zip_only_accepts_expected_cmd_path(tmp_path: Path) -> None
     assert report.mods[0].source_files[0].source_kind == "zip"
 
 
+def test_scan_rechunk_zip_reads_modinfo_and_preview(tmp_path: Path) -> None:
+    zip_path = tmp_path / "BaseCmds.zip"
+    _write_zip(
+        zip_path,
+        {
+            "modinfo.ini": "name=Source CMD Pack\nauthor=Creator\ndescription=Base files\nimage=preview.png\n",
+            "preview.png": b"fake image",
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    report = scan_rechunk_source_with_report(zip_path)
+
+    assert len(report.mods) == 1
+    assert report.mods[0].mod_name == "Source CMD Pack"
+    assert report.mods[0].author == "Creator"
+    assert report.mods[0].description == "Base files"
+    assert report.mods[0].preview_image_path_in_zip == "preview.png"
+    assert report.mods[0].source_files[0].preview_image_path_in_zip == "preview.png"
+
+
+def test_scan_rechunk_folder_reads_modinfo_and_preview(tmp_path: Path) -> None:
+    _write_folder(
+        tmp_path,
+        {
+            "modinfo.ini": "name=Loose CMD Source\nauthor=Creator\nimage=preview.png\n",
+            "preview.png": b"fake image",
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    report = scan_rechunk_source_with_report(tmp_path)
+
+    assert len(report.mods) == 1
+    assert report.mods[0].mod_name == "Loose CMD Source"
+    assert report.mods[0].author == "Creator"
+    assert report.mods[0].preview_image_path_in_zip == "preview.png"
+
+
 def test_scan_mods_folder_excludes_zips_without_supported_color_files(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "InfoOnly.zip",

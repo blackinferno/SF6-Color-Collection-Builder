@@ -107,6 +107,51 @@ def test_export_collection_zip_reads_folder_source_files(tmp_path: Path) -> None
         assert '"source_kind": "folder"' in manifest
 
 
+def test_export_collection_zip_writes_custom_modinfo_and_preview(
+    tmp_path: Path,
+) -> None:
+    source_zip = tmp_path / "Source.zip"
+    source_internal = "Nested/esf001_001_cmd_002.user.2"
+    preview_path = tmp_path / "CustomPreview.png"
+    preview_path.write_bytes(b"custom preview")
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr(source_internal, b"color data")
+
+    output_zip = tmp_path / "Edited Collection.zip"
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="normal",
+        target_slot="005",
+        source_zip=source_zip,
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="Source Mod",
+    )
+
+    export_collection_zip(
+        output_zip,
+        "Edited Collection",
+        [assignment],
+        modinfo_fields={
+            "name": "Edited Collection",
+            "author": "Custom Author",
+            "description": "Custom description",
+            "category": "Color",
+        },
+        preview_image_path=preview_path,
+    )
+
+    with zipfile.ZipFile(output_zip) as archive:
+        modinfo = archive.read("Edited Collection/modinfo.ini").decode("utf-8")
+        assert "name=Edited Collection" in modinfo
+        assert "author=Custom Author" in modinfo
+        assert "description=Custom description" in modinfo
+        assert "category=Color" in modinfo
+        assert "screenshot=CustomPreview.png" in modinfo
+        assert archive.read("Edited Collection/CustomPreview.png") == b"custom preview"
+
+
 def test_export_collection_zip_can_overwrite_loaded_collection_zip(tmp_path: Path) -> None:
     source_zip = tmp_path / "Source.zip"
     source_internal = "Nested/esf001_001_cmd_002.user.2"
