@@ -42,7 +42,7 @@ def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
 
 
 def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
-    """Scan top-level .zip files and immediate folders in a selected mods folder."""
+    """Scan top-level .zip files, loose mod folders, or a selected SF6 install folder."""
     root = Path(folder)
     if not root.exists() or not root.is_dir():
         report = ScanReport([], [])
@@ -51,6 +51,12 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
 
     mods: list[ScannedMod] = []
     issues: list[ScanIssue] = []
+    if _contains_direct_sf6_color_root(root):
+        mods, issues = scan_folder_mods_with_issues(root)
+        report = ScanReport(sorted(mods, key=lambda mod: mod.mod_name.lower()), issues)
+        write_scan_log(root, report)
+        return report
+
     for package_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
         if package_path.is_file() and package_path.suffix.lower() == ".zip":
             try:
@@ -123,6 +129,11 @@ def scan_folder_mods_with_issues(folder_path: str | Path) -> tuple[list[ScannedM
         read_modinfo=lambda path: _read_folder_modinfo(package_path, path),
     )
     return mods, [*issues, *scan_issues]
+
+
+def _contains_direct_sf6_color_root(folder_path: Path) -> bool:
+    color_root = folder_path.joinpath(*COLOR_FILE_PATH_PARTS)
+    return color_root.is_dir()
 
 
 def write_scan_log(folder: Path, report: ScanReport, log_path: Path = SCAN_LOG_PATH) -> None:

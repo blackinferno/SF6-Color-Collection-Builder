@@ -1,3 +1,3 @@
 Recent changes:
-- When editing existing mods, mod information and images are not longer overwritten.
-- "Edited by Color Collection Builder" will be added to the mod's description when a mod is edited for clarity.
+- Selecting the game folder (steamapps\common\Street Fighter 6\ or what ever) as mod folder will scan the natives folder (and re_chunk_000 folder if you have it there)
+- In actuality, any folder that directly contains "natives/stm/product/model/esf" can be scanned

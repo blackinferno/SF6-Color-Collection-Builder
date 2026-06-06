@@ -91,6 +91,27 @@ def test_scan_mods_folder_scans_top_level_loose_folders(tmp_path: Path) -> None:
     )
 
 
+def test_scan_mods_folder_scans_selected_street_fighter_install_folder(
+    tmp_path: Path,
+) -> None:
+    install_folder = tmp_path / "Street Fighter 6"
+    _write_folder(
+        install_folder,
+        {
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"game color",
+        },
+    )
+
+    mods = scan_mods_folder(install_folder)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "Street Fighter 6"
+    assert mods[0].source_kind == "folder"
+    assert mods[0].source_files[0].internal_file_path == (
+        f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2"
+    )
+
+
 def test_scan_mods_folder_excludes_zips_without_supported_color_files(tmp_path: Path) -> None:
     _write_zip(
         tmp_path / "InfoOnly.zip",
