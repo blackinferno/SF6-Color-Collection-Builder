@@ -498,7 +498,7 @@ def test_switching_source_tab_shows_disk_cache_then_autoscans_first_visit(
 
     assert window.mods == [cached_mod]
     assert calls == [(tmp_path, "rechunk")]
-    assert "Showing cached re_chunk / ZIP data" in window.statusBar().currentMessage()
+    assert "Showing cached re_chunk / Archive data" in window.statusBar().currentMessage()
 
 
 def test_switching_source_tab_does_not_rescan_after_session_refresh(

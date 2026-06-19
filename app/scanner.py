@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import configparser
-import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
+from app.archive_utils import (
+    ArchiveReadError,
+    archive_kind,
+    is_supported_archive,
+    list_archive_files,
+    read_archive_file,
+)
 from app.models import ParsedColorFile, ScannedMod, SourceColorFile
 from app.parser import parse_color_filename
 from app.settings import SCAN_LOG_PATH
@@ -46,14 +52,14 @@ def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
 def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
     """Fast scan for base CMD sources under natives/stm/product/model/esf only."""
     root = Path(source)
-    if root.is_file() and root.suffix.lower() == ".zip":
+    if is_supported_archive(root):
         try:
-            mods, issues = _scan_rechunk_zip(root)
+            mods, issues = _scan_rechunk_archive(root)
             report = ScanReport(mods, issues)
-        except zipfile.BadZipFile as error:
+        except ArchiveReadError as error:
             report = ScanReport(
                 [],
-                [ScanIssue(root, None, "Bad or unreadable zip file", str(error))],
+                [ScanIssue(root, None, "Bad or unreadable archive file", str(error))],
             )
         write_scan_log(root, report)
         return report
@@ -72,13 +78,13 @@ def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
 def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
     """Scan a zip, top-level mod packages, or a selected SF6 data folder."""
     root = Path(folder)
-    if root.is_file() and root.suffix.lower() == ".zip":
+    if is_supported_archive(root):
         try:
-            mods, issues = scan_zip_mods_with_issues(root)
-        except zipfile.BadZipFile as error:
+            mods, issues = scan_archive_mods_with_issues(root)
+        except ArchiveReadError as error:
             report = ScanReport(
                 [],
-                [ScanIssue(root, None, "Bad or unreadable zip file", str(error))],
+                [ScanIssue(root, None, "Bad or unreadable archive file", str(error))],
             )
             write_scan_log(root, report)
             return report
@@ -100,12 +106,12 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
         return report
 
     for package_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
-        if package_path.is_file() and package_path.suffix.lower() == ".zip":
+        if is_supported_archive(package_path):
             try:
-                package_mods, package_issues = scan_zip_mods_with_issues(package_path)
-            except zipfile.BadZipFile as error:
+                package_mods, package_issues = scan_archive_mods_with_issues(package_path)
+            except ArchiveReadError as error:
                 issues.append(
-                    ScanIssue(package_path, None, "Bad or unreadable zip file", str(error))
+                    ScanIssue(package_path, None, "Bad or unreadable archive file", str(error))
                 )
                 continue
             mods.extend(package_mods)
@@ -120,18 +126,17 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
     return report
 
 
-def _scan_rechunk_zip(zip_path: Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
-    with zipfile.ZipFile(zip_path) as archive:
-        entries = [
-            name.replace("\\", "/")
-            for name in archive.namelist()
-            if _is_rechunk_color_entry(name) or _is_rechunk_metadata_entry(name)
-        ]
+def _scan_rechunk_archive(archive_path: Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
+    entries = [
+        name.replace("\\", "/")
+        for name in list_archive_files(archive_path)
+        if _is_rechunk_color_entry(name) or _is_rechunk_metadata_entry(name)
+    ]
     return _scan_package_entries(
-        package_path=zip_path,
-        source_kind="zip",
+        package_path=archive_path,
+        source_kind=archive_kind(archive_path),
         entries=entries,
-        read_modinfo=lambda path: _read_zip_modinfo(zip_path, path),
+        read_modinfo=lambda path: _read_archive_modinfo(archive_path, path),
     )
 
 
@@ -233,29 +238,34 @@ def _is_rechunk_metadata_entry(name: str) -> bool:
 
 
 def scan_zip(zip_path: str | Path) -> ScannedMod:
-    mods = scan_zip_mods(zip_path)
+    mods = scan_archive_mods(zip_path)
     if not mods:
         return ScannedMod(zip_path=Path(zip_path), mod_name=Path(zip_path).stem)
     return mods[0]
 
 
 def scan_zip_mods(zip_path: str | Path) -> list[ScannedMod]:
-    return scan_zip_mods_with_issues(zip_path)[0]
+    return scan_archive_mods(zip_path)
 
 
 def scan_zip_mods_with_issues(zip_path: str | Path) -> tuple[list[ScannedMod], list[ScanIssue]]:
-    package_path = Path(zip_path)
-    with zipfile.ZipFile(package_path) as archive:
-        entries = [
-            name.replace("\\", "/")
-            for name in archive.namelist()
-            if not name.endswith("/")
-        ]
+    return scan_archive_mods_with_issues(zip_path)
+
+
+def scan_archive_mods(zip_path: str | Path) -> list[ScannedMod]:
+    return scan_archive_mods_with_issues(zip_path)[0]
+
+
+def scan_archive_mods_with_issues(
+    archive_path: str | Path,
+) -> tuple[list[ScannedMod], list[ScanIssue]]:
+    package_path = Path(archive_path)
+    entries = list_archive_files(package_path)
     return _scan_package_entries(
         package_path=package_path,
-        source_kind="zip",
+        source_kind=archive_kind(package_path),
         entries=entries,
-        read_modinfo=lambda path: _read_zip_modinfo(package_path, path),
+        read_modinfo=lambda path: _read_archive_modinfo(package_path, path),
     )
 
 
@@ -351,7 +361,7 @@ def _scan_package_entries(
     for modinfo_path in modinfo_paths:
         try:
             data, parse_error = read_modinfo(modinfo_path)
-        except OSError as error:
+        except (OSError, ArchiveReadError) as error:
             issues.append(
                 ScanIssue(package_path, modinfo_path, "Could not read modinfo.ini", str(error))
             )
@@ -427,9 +437,8 @@ def _path_parts_index(
     return None
 
 
-def _read_zip_modinfo(package_path: Path, name: str) -> tuple[dict[str, str], str]:
-    with zipfile.ZipFile(package_path) as archive:
-        raw = archive.read(name).decode("utf-8-sig", errors="replace")
+def _read_archive_modinfo(package_path: Path, name: str) -> tuple[dict[str, str], str]:
+    raw = read_archive_file(package_path, name).decode("utf-8-sig", errors="replace")
     return _parse_modinfo(raw)
 
 

@@ -1,3 +1,9 @@
+SF6 Color Collection Builder v0.2.0
+
+Recent changes:
+- Added support for .rar and .7z files.
+- Minor UI improvement.
+
 SF6 Color Collection Builder v0.1.9
 
 Recent changes:

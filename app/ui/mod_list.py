@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import zipfile
-
 from PySide6.QtCore import QTimer, QSize, Signal, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -16,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.archive_utils import ArchiveReadError, read_archive_file
 from app.characters import character_label
 from app.models import ScannedMod
 
@@ -27,7 +26,7 @@ class ModList(QWidget):
     SOURCES = (
         ("mods", "Mod Folder"),
         ("natives", "Natives"),
-        ("rechunk", "re_chunk / ZIP"),
+        ("rechunk", "re_chunk / Archive"),
     )
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -152,8 +151,10 @@ class ModList(QWidget):
                 if mod.source_kind == "folder":
                     image_bytes = (mod.zip_path / mod.preview_image_path_in_zip).read_bytes()
                 else:
-                    with zipfile.ZipFile(mod.zip_path) as archive:
-                        image_bytes = archive.read(mod.preview_image_path_in_zip)
+                    image_bytes = read_archive_file(
+                        mod.zip_path,
+                        mod.preview_image_path_in_zip,
+                    )
                 loaded = QPixmap()
                 if loaded.loadFromData(image_bytes):
                     pixmap = loaded.scaled(
@@ -162,7 +163,7 @@ class ModList(QWidget):
                         Qt.KeepAspectRatio,
                         Qt.SmoothTransformation,
                     )
-            except (OSError, KeyError, zipfile.BadZipFile):
+            except (OSError, KeyError, ArchiveReadError):
                 pass
 
         self._pixmap_cache[cache_key] = pixmap

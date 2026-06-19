@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import shutil
 import zipfile
 from pathlib import Path
+
+import py7zr
 
 from app.scanner import (
     scan_mods_folder,
@@ -19,6 +22,18 @@ def _write_zip(path: Path, files: dict[str, str | bytes]) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         for internal_path, content in files.items():
             archive.writestr(internal_path, content)
+
+
+def _write_7z(path: Path, files: dict[str, str | bytes]) -> None:
+    source_root = path.parent / f"{path.stem}_source"
+    if source_root.exists():
+        shutil.rmtree(source_root)
+    _write_folder(source_root, files)
+    with py7zr.SevenZipFile(path, "w") as archive:
+        for file_path in source_root.rglob("*"):
+            if file_path.is_file():
+                archive.write(file_path, file_path.relative_to(source_root).as_posix())
+    shutil.rmtree(source_root)
 
 
 def _write_folder(root: Path, files: dict[str, str | bytes]) -> None:
@@ -94,6 +109,23 @@ def test_scan_mods_folder_accepts_direct_zip_path(tmp_path: Path) -> None:
     )
 
 
+def test_scan_mods_folder_accepts_7z_archive(tmp_path: Path) -> None:
+    archive_path = tmp_path / "SevenZipMod.7z"
+    _write_7z(
+        archive_path,
+        {
+            "modinfo.ini": "name=Seven Zip Mod\n",
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mods = scan_mods_folder(archive_path)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "Seven Zip Mod"
+    assert mods[0].source_kind == "7z"
+
+
 def test_scan_mods_folder_scans_top_level_loose_folders(tmp_path: Path) -> None:
     loose = tmp_path / "LooseMod"
     _write_folder(
@@ -158,6 +190,22 @@ def test_scan_mods_folder_scans_selected_natives_folder_from_stm(
     )
 
 
+def test_scan_mods_folder_scans_top_level_7z_archives(tmp_path: Path) -> None:
+    _write_7z(
+        tmp_path / "Packed.7z",
+        {
+            "modinfo.ini": "name=Packed Mod\n",
+            f"{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    mods = scan_mods_folder(tmp_path)
+
+    assert len(mods) == 1
+    assert mods[0].mod_name == "Packed Mod"
+    assert mods[0].source_kind == "7z"
+
+
 def test_scan_rechunk_folder_only_checks_direct_cmd_costume_folders(
     tmp_path: Path,
 ) -> None:
@@ -216,6 +264,25 @@ def test_scan_rechunk_zip_reads_modinfo_and_preview(tmp_path: Path) -> None:
     assert report.mods[0].description == "Base files"
     assert report.mods[0].preview_image_path_in_zip == "preview.png"
     assert report.mods[0].source_files[0].preview_image_path_in_zip == "preview.png"
+
+
+def test_scan_rechunk_7z_reads_modinfo_and_preview(tmp_path: Path) -> None:
+    archive_path = tmp_path / "BaseCmds.7z"
+    _write_7z(
+        archive_path,
+        {
+            "modinfo.ini": "name=7z CMD Pack\nauthor=Creator\nimage=preview.png\n",
+            "preview.png": b"fake image",
+            f"re_chunk_000/{COLOR_ROOT}/esf001/001/esf001_001_cmd_002.user.2": b"ok",
+        },
+    )
+
+    report = scan_rechunk_source_with_report(archive_path)
+
+    assert len(report.mods) == 1
+    assert report.mods[0].mod_name == "7z CMD Pack"
+    assert report.mods[0].source_kind == "7z"
+    assert report.mods[0].preview_image_path_in_zip == "preview.png"
 
 
 def test_scan_rechunk_folder_reads_modinfo_and_preview(tmp_path: Path) -> None:

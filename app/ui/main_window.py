@@ -29,9 +29,10 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
+from app.archive_utils import ArchiveWriteError, is_supported_archive
 from app.auto_updater import can_auto_update, launch_prepared_update, prepare_update
 from app.characters import CHARACTER_NAMES, character_label
-from app.exporter import export_collection_zip
+from app.exporter import can_write_collection_archive, export_collection_archive
 from app.models import CollectionAssignment, ScannedMod
 from app.project_io import load_exported_collection_zip
 from app.scanner import (
@@ -98,6 +99,7 @@ class MainWindow(QMainWindow):
 
         self.mod_list = ModList()
         self.character_column = OptionColumn("Character", columns=2)
+        self.character_column.setMinimumWidth(250)
         self.costume_column = OptionColumn("Costume")
         self.costume_column.setMinimumWidth(116)
         self.slot_column = SlotColumn()
@@ -130,7 +132,9 @@ class MainWindow(QMainWindow):
     def _restore_window_geometry(self) -> None:
         geometry = self.settings.window_geometry()
         if geometry.isEmpty() or not self.restoreGeometry(geometry):
-            self.resize(1320, 760)
+            self.resize(1415, 760)
+        elif self.width() < 1415:
+            self.resize(1415, self.height())
 
     def _build_toolbar(self) -> None:
         donation_toolbar = QToolBar("Donate")
@@ -220,7 +224,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         for widget, stretch in (
             (self.mod_list, 5),
-            (self.character_column, 2),
+            (self.character_column, 3),
             (self.costume_column, 1),
             (self.slot_column, 2),
             (self.assignment_arrow, 0),
@@ -253,6 +257,7 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_styles(self) -> None:
+        combo_arrow_path = (PROJECT_ROOT / "img" / "combo_down_arrow.svg").as_posix()
         self.setStyleSheet("""
             QMainWindow,
             QWidget {
@@ -307,11 +312,18 @@ class MainWindow(QMainWindow):
                 border-color: #383838;
             }
             QComboBox {
-                padding: 4px 8px;
+                padding: 4px 28px 4px 8px;
             }
             QComboBox::drop-down {
                 border: none;
-                width: 20px;
+                width: 24px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }
+            QComboBox::down-arrow {
+                image: url(__COMBO_ARROW_PATH__);
+                width: 12px;
+                height: 8px;
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #383838;
@@ -537,7 +549,7 @@ class MainWindow(QMainWindow):
                 font-weight: 400;
                 background: transparent;
             }
-            """)
+            """.replace("__COMBO_ARROW_PATH__", combo_arrow_path))
 
     def _choose_folder(self) -> None:
         source_key = self.mod_list.current_source_key
@@ -730,7 +742,7 @@ class MainWindow(QMainWindow):
         dialog.resize(560, 120)
 
         path_input = QLineEdit(self.settings.scan_source_folder("rechunk"))
-        path_input.setPlaceholderText("Select a re_chunk folder or Source CMD ZIP")
+        path_input.setPlaceholderText("Select a re_chunk folder or Source CMD archive")
 
         def browse_folder() -> None:
             folder = QFileDialog.getExistingDirectory(
@@ -744,16 +756,16 @@ class MainWindow(QMainWindow):
         def browse_zip() -> None:
             path, _selected_filter = QFileDialog.getOpenFileName(
                 dialog,
-                "Select re_chunk ZIP",
+                "Select re_chunk Archive",
                 path_input.text(),
-                "Zip Files (*.zip)",
+                "Archive Files (*.zip *.7z *.rar)",
             )
             if path:
                 path_input.setText(path)
 
         folder_button = QPushButton("Folder")
         folder_button.clicked.connect(browse_folder)
-        zip_button = QPushButton("ZIP")
+        zip_button = QPushButton("Archive")
         zip_button.clicked.connect(browse_zip)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -766,7 +778,7 @@ class MainWindow(QMainWindow):
         path_layout.addWidget(zip_button)
 
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("re_chunk folder / Source CMD ZIP:"))
+        layout.addWidget(QLabel("re_chunk folder / Source CMD archive:"))
         layout.addLayout(path_layout)
         layout.addWidget(button_box)
 
@@ -782,14 +794,14 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(
             self,
             APP_NAME,
-            "Select a re_chunk folder or Source CMD ZIP.",
+            "Select a re_chunk folder or Source CMD archive.",
         )
         return ""
 
     def _is_valid_scan_path(self, source_key: str, path: Path) -> bool:
         if path.is_dir():
             return True
-        return source_key == "rechunk" and path.is_file() and path.suffix.lower() == ".zip"
+        return source_key == "rechunk" and is_supported_archive(path)
 
     def _should_auto_select_source_mod(self, source_key: str) -> bool:
         return source_key in {"natives", "rechunk"} and bool(self.mods)
@@ -1174,9 +1186,9 @@ class MainWindow(QMainWindow):
     def _open_project(self) -> None:
         path, _selected_filter = QFileDialog.getOpenFileName(
             self,
-            "Open Collection Zip",
+            "Open Collection Archive",
             self.settings.last_project_folder(),
-            "Zip Mods (*.zip)",
+            "Archives (*.zip *.7z *.rar)",
         )
         if not path:
             return
@@ -1211,19 +1223,19 @@ class MainWindow(QMainWindow):
             self.collection_name,
             ".zip",
         )
-        path, _selected_filter = QFileDialog.getSaveFileName(
+        path, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Save Collection",
             str(default_path),
-            "Zip Mods (*.zip)",
+            "ZIP Archive (*.zip);;7Z Archive (*.7z);;RAR Archive (*.rar)",
         )
         if not path:
             return
-        output_path = Path(path)
-        if output_path.suffix == "":
-            output_path = output_path.with_suffix(".zip")
-        self.current_output_path = output_path
-        self._export_to_path(output_path)
+        output_path = self._archive_save_path(Path(path), selected_filter)
+        if not self._ensure_writable_archive(output_path):
+            return
+        if self._export_to_path(output_path):
+            self.current_output_path = output_path
 
     def _select_first_assignment_context(
         self,
@@ -1239,25 +1251,61 @@ class MainWindow(QMainWindow):
         self.selected_costume = first.costume
         self.selected_source_slot = None
 
-    def _export_to_path(self, output_path: Path) -> None:
+    def _export_to_path(self, output_path: Path) -> bool:
         if not self.assignments:
             QMessageBox.information(
                 self,
                 APP_NAME,
                 "Assign at least one target slot before saving.",
             )
-            return
+            return False
 
+        if not self._ensure_writable_archive(output_path):
+            return False
         self.settings.set_last_project_folder(output_path.parent)
-        export_collection_zip(
-            output_path,
-            self.collection_name,
-            sorted(self.assignments.values(), key=lambda item: item.key),
-            preserve_existing_metadata=output_path.exists(),
-            modinfo_fields=self.collection_info_fields,
-            preview_image_path=self.collection_preview_path,
-        )
+        try:
+            export_collection_archive(
+                output_path,
+                self.collection_name,
+                sorted(self.assignments.values(), key=lambda item: item.key),
+                preserve_existing_metadata=output_path.exists(),
+                modinfo_fields=self.collection_info_fields,
+                preview_image_path=self.collection_preview_path,
+            )
+        except ArchiveWriteError as error:
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                f"Could not save {output_path.name}:\n{error}",
+            )
+            self.statusBar().showMessage("Save failed.", 5000)
+            return False
         self.statusBar().showMessage(f"Saved {output_path.name}.", 5000)
+        return True
+
+    def _archive_save_path(self, path: Path, selected_filter: str) -> Path:
+        suffix = path.suffix.lower()
+        if suffix in {".zip", ".7z", ".rar"}:
+            return path
+        if "*.7z" in selected_filter:
+            return path.with_suffix(".7z")
+        if "*.rar" in selected_filter:
+            return path.with_suffix(".rar")
+        return path.with_suffix(".zip")
+
+    def _ensure_writable_archive(self, output_path: Path) -> bool:
+        if can_write_collection_archive(output_path):
+            return True
+        if output_path.suffix.lower() == ".rar":
+            message = (
+                "Saving RAR archives requires WinRAR/RAR command-line tools.\n\n"
+                "Use Save As and choose ZIP or 7Z, or install WinRAR/RAR to save RAR."
+            )
+        else:
+            message = f"Unsupported archive format: {output_path.suffix}"
+        QMessageBox.warning(self, APP_NAME, message)
+        self.statusBar().showMessage("Save format is not available.", 5000)
+        return False
 
     def _edit_collection_info(self) -> None:
         dialog = QDialog(self)

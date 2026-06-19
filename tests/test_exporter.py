@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import shutil
 import zipfile
 from pathlib import Path
 
-from app.exporter import COLLECTION_MANIFEST_NAME, export_collection_zip, rename_slot
+import py7zr
+
+from app.archive_utils import list_archive_files, read_archive_file
+from app.exporter import (
+    COLLECTION_MANIFEST_NAME,
+    can_write_collection_archive,
+    export_collection_archive,
+    export_collection_zip,
+    rename_slot,
+)
 from app.models import CollectionAssignment
+
+
+def _write_7z(path: Path, files: dict[str, str | bytes]) -> None:
+    source_root = path.parent / f"{path.stem}_source"
+    if source_root.exists():
+        shutil.rmtree(source_root)
+    for internal_path, content in files.items():
+        output_path = source_root / internal_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            output_path.write_bytes(content)
+        else:
+            output_path.write_text(content, encoding="utf-8")
+    with py7zr.SevenZipFile(path, "w") as archive:
+        for file_path in source_root.rglob("*"):
+            if file_path.is_file():
+                archive.write(file_path, file_path.relative_to(source_root).as_posix())
+    shutil.rmtree(source_root)
 
 
 def test_rename_slot_only_changes_final_slot() -> None:
@@ -105,6 +133,75 @@ def test_export_collection_zip_reads_folder_source_files(tmp_path: Path) -> None
         assert archive.read(output_path) == b"folder color data"
         manifest = archive.read(f"My Collection/{COLLECTION_MANIFEST_NAME}").decode("utf-8")
         assert '"source_kind": "folder"' in manifest
+
+
+def test_export_collection_zip_reads_7z_source_files(tmp_path: Path) -> None:
+    source_archive = tmp_path / "Source.7z"
+    source_internal = "Nested/esf001_001_cmd_002.user.2"
+    _write_7z(source_archive, {source_internal: b"7z color data"})
+
+    output_zip = tmp_path / "My Collection.zip"
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="normal",
+        target_slot="006",
+        source_zip=source_archive,
+        source_kind="7z",
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="7z Source",
+    )
+
+    export_collection_zip(output_zip, "My Collection", [assignment])
+
+    with zipfile.ZipFile(output_zip) as archive:
+        output_path = "My Collection/natives/stm/product/model/esf/esf001/001/esf001_001_cmd_006.user.2"
+        assert archive.read(output_path) == b"7z color data"
+        manifest = archive.read(f"My Collection/{COLLECTION_MANIFEST_NAME}").decode("utf-8")
+        assert '"source_kind": "7z"' in manifest
+
+
+def test_archive_reader_resolves_windows_style_member_paths(tmp_path: Path) -> None:
+    source_zip = tmp_path / "WindowsPaths.zip"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("Mod\\preview.png", b"preview data")
+
+    assert read_archive_file(source_zip, "Mod/preview.png") == b"preview data"
+
+
+def test_export_collection_archive_writes_7z_output(tmp_path: Path) -> None:
+    source_zip = tmp_path / "Source.zip"
+    source_internal = "Nested/esf001_001_cmd_002.user.2"
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr(source_internal, b"color data")
+
+    output_archive = tmp_path / "My Collection.7z"
+    assignment = CollectionAssignment(
+        character="esf001",
+        costume="001",
+        type="dx",
+        target_slot="006",
+        source_zip=source_zip,
+        source_internal_file_path=source_internal,
+        source_slot="002",
+        source_mod_name="Source Mod",
+    )
+
+    export_collection_archive(output_archive, "My Collection", [assignment])
+
+    names = list_archive_files(output_archive)
+    output_path = "My Collection/natives/stm/product/model/esf/esf001/001/esf001_001_cmd_dx_006.user.2"
+    assert "My Collection/modinfo.ini" in names
+    assert f"My Collection/{COLLECTION_MANIFEST_NAME}" in names
+    assert output_path in names
+    assert read_archive_file(output_archive, output_path) == b"color data"
+
+
+def test_can_write_collection_archive_reports_supported_formats(tmp_path: Path) -> None:
+    assert can_write_collection_archive(tmp_path / "Collection.zip")
+    assert can_write_collection_archive(tmp_path / "Collection.7z")
+    assert not can_write_collection_archive(tmp_path / "Collection.txt")
 
 
 def test_export_collection_zip_writes_custom_modinfo_and_preview(
