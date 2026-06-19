@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import shutil
 import zipfile
 from pathlib import Path
 
-import py7zr
-
+from app.archive_utils import write_archive_files
 from app.scanner import (
     scan_mods_folder,
     scan_mods_folder_with_report,
@@ -25,15 +23,13 @@ def _write_zip(path: Path, files: dict[str, str | bytes]) -> None:
 
 
 def _write_7z(path: Path, files: dict[str, str | bytes]) -> None:
-    source_root = path.parent / f"{path.stem}_source"
-    if source_root.exists():
-        shutil.rmtree(source_root)
-    _write_folder(source_root, files)
-    with py7zr.SevenZipFile(path, "w") as archive:
-        for file_path in source_root.rglob("*"):
-            if file_path.is_file():
-                archive.write(file_path, file_path.relative_to(source_root).as_posix())
-    shutil.rmtree(source_root)
+    write_archive_files(
+        path,
+        {
+            internal_path: content if isinstance(content, bytes) else content.encode()
+            for internal_path, content in files.items()
+        },
+    )
 
 
 def _write_folder(root: Path, files: dict[str, str | bytes]) -> None:

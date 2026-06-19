@@ -5,7 +5,6 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from types import ModuleType
 
 import rarfile
 
@@ -52,16 +51,7 @@ def list_archive_files(path: str | Path) -> list[str]:
                     if not name.endswith("/")
                 ]
         if suffix == ".7z":
-            py7zr = _load_py7zr(ArchiveReadError)
-            try:
-                with py7zr.SevenZipFile(archive_path, "r") as archive:
-                    return [
-                        name.replace("\\", "/")
-                        for name in archive.getnames()
-                        if not name.endswith("/")
-                    ]
-            except Exception as error:
-                raise ArchiveReadError(str(error)) from error
+            return _list_7z_files(archive_path)
         if suffix == ".rar":
             with rarfile.RarFile(archive_path) as archive:
                 return [
@@ -124,7 +114,12 @@ def write_archive_files(path: str | Path, files: dict[str, bytes]) -> None:
                     archive.writestr(internal_path, data)
             return
         if suffix == ".7z":
-            _write_7z_files(archive_path, files)
+            temp_path = _temporary_archive_path(archive_path)
+            try:
+                _write_7z_files(temp_path, files)
+                temp_path.replace(archive_path)
+            finally:
+                temp_path.unlink(missing_ok=True)
             return
         if suffix == ".rar":
             temp_path = _temporary_archive_path(archive_path)
@@ -140,34 +135,46 @@ def write_archive_files(path: str | Path, files: dict[str, bytes]) -> None:
 
 
 def _read_7z_file(path: Path, internal_path: str) -> bytes:
-    py7zr = _load_py7zr(ArchiveReadError)
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_root = Path(temp_dir)
-            with py7zr.SevenZipFile(path, "r") as archive:
-                member_name = _resolve_archive_member_name(
-                    archive.getnames(), internal_path
-                )
-                archive.extract(path=output_root, targets=[member_name])
-            return (output_root / member_name).read_bytes()
-    except ArchiveReadError:
-        raise
-    except Exception as error:
-        raise ArchiveReadError(str(error)) from error
+    member_name = _resolve_archive_member_name(
+        _list_7z_member_names(path),
+        internal_path,
+    )
+    return _read_file_with_archive_tool(path, member_name)
 
 
-def _load_py7zr(error_type: type[Exception]) -> ModuleType:
-    try:
-        import py7zr
-    except ImportError as error:
-        raise error_type(
-            "7Z support could not be loaded. Reinstall or re-extract the complete app."
-        ) from error
-    return py7zr
+def _list_7z_files(path: Path) -> list[str]:
+    return [
+        _normalize_archive_member_name(name)
+        for name in _list_7z_member_names(path)
+        if not name.endswith(("/", "\\"))
+    ]
+
+
+def _list_7z_member_names(path: Path) -> list[str]:
+    tar_executable = _tar_executable()
+    if tar_executable is None:
+        raise ArchiveReadError("Windows tar.exe is required for 7Z support.")
+    result = subprocess.run(
+        [str(tar_executable), "-tf", str(path)],
+        capture_output=True,
+        check=False,
+        creationflags=_subprocess_creation_flags(),
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ArchiveReadError(detail or "Could not list the 7Z archive.")
+    return [
+        line.strip()
+        for line in result.stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip()
+    ]
 
 
 def _normalize_archive_member_name(name: str) -> str:
-    return name.replace("\\", "/")
+    normalized = name.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
 
 
 def _resolve_archive_member_name(names: list[str], requested_name: str) -> str:
@@ -190,6 +197,7 @@ def _read_file_with_archive_tool(path: Path, internal_path: str) -> bytes:
             command,
             capture_output=True,
             check=False,
+            creationflags=_subprocess_creation_flags(),
         )
         if result.returncode == 0:
             return result.stdout
@@ -253,25 +261,41 @@ def _archive_extract_tools() -> list[Path]:
 
 
 def _write_7z_files(path: Path, files: dict[str, bytes]) -> None:
-    py7zr = _load_py7zr(ArchiveWriteError)
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            for internal_path, data in files.items():
-                output_path = root / internal_path
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(data)
-            with py7zr.SevenZipFile(path, "w") as archive:
-                for file_path in root.rglob("*"):
-                    if file_path.is_file():
-                        archive.write(
-                            file_path,
-                            file_path.relative_to(root).as_posix(),
-                        )
-    except ArchiveWriteError:
-        raise
-    except Exception as error:
-        raise ArchiveWriteError(str(error)) from error
+    tar_executable = _tar_executable()
+    if tar_executable is None:
+        raise ArchiveWriteError("Windows tar.exe is required for 7Z support.")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        for internal_path, data in files.items():
+            output_path = root / internal_path
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(data)
+        path.unlink(missing_ok=True)
+        result = subprocess.run(
+            [
+                str(tar_executable),
+                "-cf",
+                str(path.resolve()),
+                "--format=7zip",
+                "-C",
+                str(root),
+                ".",
+            ],
+            capture_output=True,
+            check=False,
+            creationflags=_subprocess_creation_flags(),
+        )
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise ArchiveWriteError(detail or "Could not create the 7Z archive.")
+
+
+def _tar_executable() -> Path | None:
+    resolved = shutil.which("tar") or shutil.which("bsdtar")
+    if resolved:
+        return Path(resolved)
+    system_tar = Path("C:/Windows/System32/tar.exe")
+    return system_tar if system_tar.exists() else None
 
 
 def _temporary_archive_path(path: Path) -> Path:
@@ -310,7 +334,12 @@ def _write_rar_files(path: Path, files: dict[str, bytes]) -> None:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=_subprocess_creation_flags(),
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip()
             raise ArchiveWriteError(detail or "RAR command failed.")
+
+
+def _subprocess_creation_flags() -> int:
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)

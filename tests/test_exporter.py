@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import shutil
 import zipfile
 from pathlib import Path
 
-import py7zr
-
-from app.archive_utils import list_archive_files, read_archive_file
+from app.archive_utils import list_archive_files, read_archive_file, write_archive_files
 from app.exporter import (
     COLLECTION_MANIFEST_NAME,
     can_write_collection_archive,
@@ -18,21 +15,13 @@ from app.models import CollectionAssignment
 
 
 def _write_7z(path: Path, files: dict[str, str | bytes]) -> None:
-    source_root = path.parent / f"{path.stem}_source"
-    if source_root.exists():
-        shutil.rmtree(source_root)
-    for internal_path, content in files.items():
-        output_path = source_root / internal_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(content, bytes):
-            output_path.write_bytes(content)
-        else:
-            output_path.write_text(content, encoding="utf-8")
-    with py7zr.SevenZipFile(path, "w") as archive:
-        for file_path in source_root.rglob("*"):
-            if file_path.is_file():
-                archive.write(file_path, file_path.relative_to(source_root).as_posix())
-    shutil.rmtree(source_root)
+    write_archive_files(
+        path,
+        {
+            internal_path: content if isinstance(content, bytes) else content.encode()
+            for internal_path, content in files.items()
+        },
+    )
 
 
 def test_rename_slot_only_changes_final_slot() -> None:

@@ -1,3 +1,9 @@
+SF6 Color Collection Builder v0.2.2
+
+Recent changes:
+- Reworked 7Z handling to use Windows' built-in archive tools instead of bundled native support files.
+- Improved RAR helper compatibility and prevented archive helper windows from appearing.
+
 SF6 Color Collection Builder v0.2.1
 
 Recent changes:
