@@ -1,3 +1,8 @@
+SF6 Color Collection Builder v0.2.1
+
+Recent changes:
+- Fixed a startup error caused by missing 7Z support files in some extracted builds.
+
 SF6 Color Collection Builder v0.2.0
 
 Recent changes:

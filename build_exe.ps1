@@ -4,6 +4,7 @@ python -m PyInstaller `
   --name "SF6 Color Collection Builder" `
   --icon "img/colormixer.png" `
   --add-data "img;img" `
+  --collect-all "bcj" `
   app/main.py
 
 Copy-Item `

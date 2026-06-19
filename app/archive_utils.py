@@ -5,8 +5,8 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+from types import ModuleType
 
-import py7zr
 import rarfile
 
 
@@ -52,12 +52,16 @@ def list_archive_files(path: str | Path) -> list[str]:
                     if not name.endswith("/")
                 ]
         if suffix == ".7z":
-            with py7zr.SevenZipFile(archive_path, "r") as archive:
-                return [
-                    name.replace("\\", "/")
-                    for name in archive.getnames()
-                    if not name.endswith("/")
-                ]
+            py7zr = _load_py7zr(ArchiveReadError)
+            try:
+                with py7zr.SevenZipFile(archive_path, "r") as archive:
+                    return [
+                        name.replace("\\", "/")
+                        for name in archive.getnames()
+                        if not name.endswith("/")
+                    ]
+            except Exception as error:
+                raise ArchiveReadError(str(error)) from error
         if suffix == ".rar":
             with rarfile.RarFile(archive_path) as archive:
                 return [
@@ -69,7 +73,6 @@ def list_archive_files(path: str | Path) -> list[str]:
         OSError,
         subprocess.SubprocessError,
         zipfile.BadZipFile,
-        py7zr.Bad7zFile,
         rarfile.Error,
     ) as error:
         raise ArchiveReadError(str(error)) from error
@@ -101,7 +104,6 @@ def read_archive_file(path: str | Path, internal_path: str) -> bytes:
         OSError,
         KeyError,
         zipfile.BadZipFile,
-        py7zr.Bad7zFile,
         rarfile.Error,
     ) as error:
         raise ArchiveReadError(str(error)) from error
@@ -132,18 +134,36 @@ def write_archive_files(path: str | Path, files: dict[str, bytes]) -> None:
             finally:
                 temp_path.unlink(missing_ok=True)
             return
-    except (OSError, zipfile.BadZipFile, py7zr.Bad7zFile, rarfile.Error) as error:
+    except (OSError, zipfile.BadZipFile, rarfile.Error) as error:
         raise ArchiveWriteError(str(error)) from error
     raise ArchiveWriteError(f"Unsupported archive type: {archive_path.suffix}")
 
 
 def _read_7z_file(path: Path, internal_path: str) -> bytes:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        output_root = Path(temp_dir)
-        with py7zr.SevenZipFile(path, "r") as archive:
-            member_name = _resolve_archive_member_name(archive.getnames(), internal_path)
-            archive.extract(path=output_root, targets=[member_name])
-        return (output_root / member_name).read_bytes()
+    py7zr = _load_py7zr(ArchiveReadError)
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir)
+            with py7zr.SevenZipFile(path, "r") as archive:
+                member_name = _resolve_archive_member_name(
+                    archive.getnames(), internal_path
+                )
+                archive.extract(path=output_root, targets=[member_name])
+            return (output_root / member_name).read_bytes()
+    except ArchiveReadError:
+        raise
+    except Exception as error:
+        raise ArchiveReadError(str(error)) from error
+
+
+def _load_py7zr(error_type: type[Exception]) -> ModuleType:
+    try:
+        import py7zr
+    except ImportError as error:
+        raise error_type(
+            "7Z support could not be loaded. Reinstall or re-extract the complete app."
+        ) from error
+    return py7zr
 
 
 def _normalize_archive_member_name(name: str) -> str:
@@ -233,16 +253,25 @@ def _archive_extract_tools() -> list[Path]:
 
 
 def _write_7z_files(path: Path, files: dict[str, bytes]) -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        root = Path(temp_dir)
-        for internal_path, data in files.items():
-            output_path = root / internal_path
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(data)
-        with py7zr.SevenZipFile(path, "w") as archive:
-            for file_path in root.rglob("*"):
-                if file_path.is_file():
-                    archive.write(file_path, file_path.relative_to(root).as_posix())
+    py7zr = _load_py7zr(ArchiveWriteError)
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for internal_path, data in files.items():
+                output_path = root / internal_path
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(data)
+            with py7zr.SevenZipFile(path, "w") as archive:
+                for file_path in root.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(
+                            file_path,
+                            file_path.relative_to(root).as_posix(),
+                        )
+    except ArchiveWriteError:
+        raise
+    except Exception as error:
+        raise ArchiveWriteError(str(error)) from error
 
 
 def _temporary_archive_path(path: Path) -> Path:
