@@ -1143,9 +1143,8 @@ class MainWindow(QMainWindow):
         characters = {
             source.character for mod in self.mods for source in mod.source_files
         }
-        if characters:
-            return self._sort_characters(characters)
-        return self._sort_characters(CHARACTER_NAMES)
+        characters.update(CHARACTER_NAMES)
+        return self._sort_characters(characters)
 
     def _all_collection_characters(self) -> list[str]:
         characters = set(self._all_known_characters())

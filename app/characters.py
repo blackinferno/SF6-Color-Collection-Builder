@@ -29,6 +29,7 @@ CHARACTER_NAMES = {
     "esf030": "C.Viper",
     "esf031": "Alex",
     "esf032": "Ingrid",
+    "esf033": "Yasmine",
     "esf101": "SiN M.Bison",
     "esf102": "Shin Akuma",
     "esf103": "Dark Ingrid",
