@@ -1,3 +1,9 @@
+SF6 Color Collection Builder v0.2.5
+
+Recent changes:
+- Added cmd_update.log for CMD update reports and troubleshooting.
+- Added a completion popup after CMD updates with counts and first issue details.
+
 SF6 Color Collection Builder v0.2.4
 
 Recent changes:

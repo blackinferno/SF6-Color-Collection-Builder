@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QMessageBox
 
 from app.characters import CHARACTER_NAMES, character_label
+from app.cmd_updater import CmdUpdateIssue, CmdUpdateReport
 from app.models import ScannedMod, SourceColorFile
 from app.settings import APP_VERSION
 from app.scanner import scan_zip
@@ -388,6 +389,64 @@ def test_scan_folder_reports_scan_issues_in_status(
 
     assert "1 scan issues written to scan.log" in window.statusBar().currentMessage()
     assert "Broken.zip / modinfo.ini" in window.statusBar().currentMessage()
+
+
+def test_cmd_update_report_message_includes_log_and_counts(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    log_path = tmp_path / "cmd_update.log"
+    monkeypatch.setattr("app.ui.main_window.CMD_UPDATE_LOG_PATH", log_path)
+    report = CmdUpdateReport(
+        packages_checked=2,
+        color_files_checked=3,
+        files_updated=1,
+        issues=[
+            CmdUpdateIssue(
+                tmp_path / "Broken.rar",
+                None,
+                "Could not write updated archive.",
+                "RAR command failed.",
+            )
+        ],
+    )
+
+    message = window._cmd_update_report_message(report)
+
+    assert "Packages checked: 2" in message
+    assert "CMD files checked: 3" in message
+    assert "CMD files updated: 1" in message
+    assert "Issues: 1" in message
+    assert str(log_path) in message
+    assert "Broken.rar" in message
+    assert "RAR command failed." in message
+
+
+def test_cmd_update_finished_shows_popup(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    calls: list[tuple[str, str]] = []
+
+    def record_message(_parent, title, message):
+        calls.append((title, message))
+        return QMessageBox.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", record_message)
+    report = CmdUpdateReport(
+        packages_checked=1,
+        color_files_checked=2,
+        files_updated=2,
+        issues=[],
+    )
+
+    window._cmd_update_finished("mods", tmp_path, report)
+
+    assert calls == [("CMD Update Complete", window._cmd_update_report_message(report))]
 
 
 def test_natives_and_rechunk_scan_results_auto_select_first_mod(

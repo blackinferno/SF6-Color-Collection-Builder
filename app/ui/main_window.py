@@ -49,6 +49,7 @@ from app.settings import (
     GITHUB_RELEASES_API_URL,
     GITHUB_RELEASES_PAGE_URL,
     PROJECT_ROOT,
+    CMD_UPDATE_LOG_PATH,
     UPDATE_LOG_PATH,
     AppSettings,
 )
@@ -732,14 +733,17 @@ class MainWindow(QMainWindow):
         folder: Path,
         report: CmdUpdateReport,
     ) -> None:
+        message = self._cmd_update_report_message(report)
         if report.issues:
             self.statusBar().showMessage(
                 (
                     f"Updated {report.files_updated} CMD files. "
-                    f"{len(report.issues)} issues. First: {report.issues[0].display_path}"
+                    f"{len(report.issues)} issues written to cmd_update.log. "
+                    f"First: {report.issues[0].display_path}"
                 ),
                 8000,
             )
+            QMessageBox.warning(self, "CMD Update Complete", message)
         else:
             self.statusBar().showMessage(
                 (
@@ -748,6 +752,25 @@ class MainWindow(QMainWindow):
                 ),
                 6000,
             )
+            QMessageBox.information(self, "CMD Update Complete", message)
+
+    def _cmd_update_report_message(self, report: CmdUpdateReport) -> str:
+        lines = [
+            "CMD update complete.",
+            "",
+            f"Packages checked: {report.packages_checked}",
+            f"CMD files checked: {report.color_files_checked}",
+            f"CMD files updated: {report.files_updated}",
+            f"Issues: {len(report.issues)}",
+            "",
+            f"Log: {CMD_UPDATE_LOG_PATH}",
+        ]
+        if report.issues:
+            lines.extend(["", "First issue:", report.issues[0].display_path])
+            lines.append(report.issues[0].message)
+            if report.issues[0].detail:
+                lines.append(report.issues[0].detail)
+        return "\n".join(lines)
 
     def _cmd_update_failed(self, source_key: str, error: str) -> None:
         self.statusBar().showMessage(

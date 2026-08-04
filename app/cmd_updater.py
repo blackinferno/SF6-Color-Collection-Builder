@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from app.archive_utils import (
@@ -13,6 +14,7 @@ from app.archive_utils import (
     write_archive_files,
 )
 from app.parser import parse_color_filename
+from app.settings import CMD_UPDATE_LOG_PATH
 
 
 OLD_CMD_BYTES = bytes.fromhex("61 2A 53 4D")
@@ -42,6 +44,36 @@ class CmdUpdateReport:
 
 
 def update_cmds_in_source(source: str | Path) -> CmdUpdateReport:
+    root = Path(source)
+    report = _update_cmds_in_source(root)
+    write_cmd_update_log(root, report)
+    return report
+
+
+def write_cmd_update_log(
+    source: Path,
+    report: CmdUpdateReport,
+    log_path: Path | None = None,
+) -> None:
+    log_path = log_path or CMD_UPDATE_LOG_PATH
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{datetime.now().isoformat(timespec='seconds')}]\n")
+            log_file.write(f"Source: {source}\n")
+            log_file.write(f"Packages checked: {report.packages_checked}\n")
+            log_file.write(f"CMD files checked: {report.color_files_checked}\n")
+            log_file.write(f"CMD files updated: {report.files_updated}\n")
+            log_file.write(f"Issues: {len(report.issues)}\n")
+            for issue in report.issues:
+                detail = f" - {issue.detail}" if issue.detail else ""
+                log_file.write(f"- {issue.display_path}: {issue.message}{detail}\n")
+            log_file.write("\n")
+    except OSError:
+        return
+
+
+def _update_cmds_in_source(source: Path) -> CmdUpdateReport:
     root = Path(source)
     if is_supported_archive(root):
         return _update_archive(root)

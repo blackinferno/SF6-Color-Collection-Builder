@@ -17,6 +17,14 @@ from app.cmd_updater import NEW_CMD_BYTES, OLD_CMD_BYTES, update_cmds_in_source
 COLOR_ROOT = "natives/stm/product/model/esf"
 
 
+@pytest.fixture(autouse=True)
+def _use_temp_cmd_update_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.cmd_updater.CMD_UPDATE_LOG_PATH", tmp_path / "cmd_update.log")
+
+
 def _write_zip(path: Path, files: dict[str, bytes]) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         for internal_path, content in files.items():
@@ -134,3 +142,17 @@ def test_update_cmds_reports_rar_writer_requirement_without_reading_archive(
     assert report.files_updated == 0
     assert len(report.issues) == 1
     assert "WinRAR/RAR" in report.issues[0].message
+
+
+def test_update_cmds_writes_log_file(tmp_path: Path) -> None:
+    color_file = tmp_path / "esf001_001_cmd_002.user.2"
+    color_file.write_bytes(OLD_CMD_BYTES)
+
+    update_cmds_in_source(tmp_path)
+
+    log_text = (tmp_path / "cmd_update.log").read_text(encoding="utf-8")
+    assert f"Source: {tmp_path}" in log_text
+    assert "Packages checked: 1" in log_text
+    assert "CMD files checked: 1" in log_text
+    assert "CMD files updated: 1" in log_text
+    assert "Issues: 0" in log_text
