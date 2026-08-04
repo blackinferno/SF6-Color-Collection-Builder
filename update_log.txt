@@ -1,3 +1,10 @@
+SF6 Color Collection Builder v0.2.6
+
+Recent changes:
+- CMD update now includes cmd_000.user.2 files.
+- Added a manual WinRAR path option when WinRAR cannot be detected automatically.
+- Added an official WinRAR download option when RAR update support is missing.
+
 SF6 Color Collection Builder v0.2.5
 
 Recent changes:

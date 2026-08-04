@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QFileDialog
 from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QMessageBox
 
@@ -447,6 +448,85 @@ def test_cmd_update_finished_shows_popup(
     window._cmd_update_finished("mods", tmp_path, report)
 
     assert calls == [("CMD Update Complete", window._cmd_update_report_message(report))]
+
+
+def test_cmd_update_prompts_for_rar_tool_when_needed(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    rar_path = tmp_path / "Mod.rar"
+    rar_path.write_bytes(b"rar")
+    rar_tool = tmp_path / "WinRAR.exe"
+    rar_tool.write_bytes(b"")
+
+    monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "select")
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(rar_tool), ""),
+    )
+
+    assert window._ensure_rar_writer_for_cmd_update(tmp_path)
+    assert window.settings.rar_tool_path() == str(rar_tool)
+
+
+def test_cmd_update_can_open_winrar_download_when_rar_tool_is_missing(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    rar_path = tmp_path / "Mod.rar"
+    rar_path.write_bytes(b"rar")
+    opened_urls: list[str] = []
+
+    monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "download")
+    monkeypatch.setattr(
+        "app.ui.main_window.webbrowser.open",
+        lambda url: opened_urls.append(url),
+    )
+
+    assert not window._ensure_rar_writer_for_cmd_update(tmp_path)
+    assert opened_urls == ["https://www.win-rar.com/download.html"]
+
+
+def test_cmd_update_can_skip_rar_when_rar_tool_is_missing(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    rar_path = tmp_path / "Mod.rar"
+    rar_path.write_bytes(b"rar")
+
+    monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "skip")
+
+    assert window._ensure_rar_writer_for_cmd_update(tmp_path)
+
+
+def test_cmd_update_does_not_prompt_for_rar_tool_without_rars(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    (tmp_path / "esf001_001_cmd_001.user.2").write_bytes(b"cmd")
+    calls: list[str] = []
+
+    monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: calls.append("question") or QMessageBox.No,
+    )
+
+    assert window._ensure_rar_writer_for_cmd_update(tmp_path)
+    assert calls == []
 
 
 def test_natives_and_rechunk_scan_results_auto_select_first_mod(

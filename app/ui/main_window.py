@@ -29,7 +29,13 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
-from app.archive_utils import ArchiveWriteError, is_supported_archive
+from app.archive_utils import (
+    ArchiveWriteError,
+    can_write_rar,
+    is_rar_write_tool,
+    is_supported_archive,
+    set_custom_rar_tool_path,
+)
 from app.auto_updater import can_auto_update, launch_prepared_update, prepare_update
 from app.characters import CHARACTER_NAMES, character_label
 from app.cmd_updater import CmdUpdateReport, update_cmds_in_source
@@ -43,7 +49,7 @@ from app.scanner import (
 )
 from app.scan_cache import clear_scan_cache, load_scan_cache, save_scan_cache
 from app.settings import (
-    APP_ICON_PATH,
+APP_ICON_PATH,
     APP_NAME,
     APP_VERSION,
     GITHUB_RELEASES_API_URL,
@@ -67,6 +73,7 @@ CHANGE_LOG_MESSAGE = (
     "- Batch assignment can move one source slot to one target slot across Normal, DX, and EX.\n"
     "- Added character select controls in the batch assignment dialog."
 )
+WINRAR_DOWNLOAD_URL = "https://www.win-rar.com/download.html"
 
 
 class MainWindow(QMainWindow):
@@ -75,6 +82,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.settings = AppSettings()
+        self._apply_custom_rar_tool_path()
         self._restore_window_geometry()
         self.current_output_path: Path | None = None
         self.update_thread: QThread | None = None
@@ -610,6 +618,8 @@ class MainWindow(QMainWindow):
         )
         if response != QMessageBox.Yes:
             return
+        if not self._ensure_rar_writer_for_cmd_update(path):
+            return
         self._start_cmd_update(path, source_key)
 
     def _scan_last_mods_folder(self) -> None:
@@ -781,6 +791,77 @@ class MainWindow(QMainWindow):
     def _clear_cmd_update_worker(self) -> None:
         self.cmd_update_thread = None
         self.cmd_update_worker = None
+
+    def _apply_custom_rar_tool_path(self) -> None:
+        path = self.settings.rar_tool_path()
+        set_custom_rar_tool_path(path if path else None)
+
+    def _ensure_rar_writer_for_cmd_update(self, source: Path) -> bool:
+        self._apply_custom_rar_tool_path()
+        if can_write_rar() or not self._source_contains_rar(source):
+            return True
+
+        action = self._ask_for_rar_tool_action()
+        if action == "download":
+            webbrowser.open(WINRAR_DOWNLOAD_URL)
+            return False
+        if action == "skip":
+            return True
+        if action != "select":
+            return False
+
+        selected_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select rar.exe or WinRAR.exe",
+            self.settings.rar_tool_path(),
+            "WinRAR Tools (rar.exe WinRAR.exe)",
+        )
+        if not selected_path:
+            return False
+        if not is_rar_write_tool(selected_path):
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                "Select rar.exe or WinRAR.exe.",
+            )
+            return False
+
+        self.settings.set_rar_tool_path(selected_path)
+        set_custom_rar_tool_path(selected_path)
+        return True
+
+    def _ask_for_rar_tool_action(self) -> str:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Warning)
+        dialog.setWindowTitle("WinRAR Needed")
+        dialog.setText(
+            "RAR archives need rar.exe or WinRAR.exe to be updated.\n\n"
+            "WinRAR was not detected automatically."
+        )
+        select_button = dialog.addButton("Select WinRAR", QMessageBox.AcceptRole)
+        download_button = dialog.addButton("Open WinRAR Download", QMessageBox.ActionRole)
+        skip_button = dialog.addButton("Skip RAR", QMessageBox.RejectRole)
+        dialog.setDefaultButton(select_button)
+        dialog.exec()
+
+        clicked_button = dialog.clickedButton()
+        if clicked_button == select_button:
+            return "select"
+        if clicked_button == download_button:
+            return "download"
+        if clicked_button == skip_button:
+            return "skip"
+        return "cancel"
+
+    def _source_contains_rar(self, source: Path) -> bool:
+        if source.is_file():
+            return source.suffix.lower() == ".rar"
+        if not source.is_dir():
+            return False
+        try:
+            return any(path.is_file() and path.suffix.lower() == ".rar" for path in source.rglob("*"))
+        except OSError:
+            return False
 
     def _select_scan_source(self, source_key: str) -> None:
         self.scan_source_key = source_key

@@ -11,6 +11,7 @@ import rarfile
 
 
 SUPPORTED_ARCHIVE_SUFFIXES = {".zip", ".7z", ".rar"}
+_CUSTOM_RAR_TOOL_PATH: Path | None = None
 
 
 class ArchiveReadError(Exception):
@@ -38,6 +39,16 @@ def archive_kind(path: Path) -> str:
 
 def can_write_rar() -> bool:
     return _rar_write_tool() is not None
+
+
+def set_custom_rar_tool_path(path: str | Path | None) -> None:
+    global _CUSTOM_RAR_TOOL_PATH
+    candidate = Path(path) if path else None
+    _CUSTOM_RAR_TOOL_PATH = candidate if candidate and _is_rar_write_tool(candidate) else None
+
+
+def is_rar_write_tool(path: str | Path) -> bool:
+    return _is_rar_write_tool(Path(path))
 
 
 def list_archive_files(path: str | Path) -> list[str]:
@@ -348,6 +359,8 @@ def _write_rar_files(path: Path, files: dict[str, bytes]) -> None:
 
 
 def _rar_write_tool() -> str | None:
+    if _CUSTOM_RAR_TOOL_PATH and _is_rar_write_tool(_CUSTOM_RAR_TOOL_PATH):
+        return str(_CUSTOM_RAR_TOOL_PATH)
     for candidate in ("rar", "WinRAR"):
         resolved = shutil.which(candidate)
         if resolved:
@@ -358,6 +371,10 @@ def _rar_write_tool() -> str | None:
             if executable.exists():
                 return str(executable)
     return None
+
+
+def _is_rar_write_tool(path: Path) -> bool:
+    return path.is_file() and path.name.lower() in {"rar.exe", "winrar.exe"}
 
 
 def _winrar_install_folders() -> list[Path]:

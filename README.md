@@ -33,7 +33,8 @@ You do not need Python unless you want to run or modify the source code.
 - Remember the last mods folder, save folder, and window size.
 - Check GitHub releases for updates.
 - Write scan warnings to `scan.log` beside the executable.
-- Function to batch update/fix old cmds to be compatible with the Yasmine Update.
+- Function to batch update/fix old CMDs, including `cmd_000.user.2`, to be compatible with the Yasmine Update.
+- Prompt for WinRAR or open the official WinRAR download page when RAR update support is missing.
 - Write CMD update reports to `cmd_update.log` beside the executable.
 - Show character `esf` ID numbers beside character names.
 

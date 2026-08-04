@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 
 APP_NAME = "SF6 Color Collection Builder"
-APP_VERSION = "0.2.5"
+APP_VERSION = "0.2.6"
 ORG_NAME = "MarshialLaw"
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 APP_DATA_ROOT = (
@@ -70,6 +70,12 @@ class AppSettings:
 
     def set_last_project_folder(self, folder: str | Path) -> None:
         self._settings.setValue("paths/last_project_folder", str(folder))
+
+    def rar_tool_path(self) -> str:
+        return str(self._settings.value("paths/rar_tool_path", "", str))
+
+    def set_rar_tool_path(self, path: str | Path) -> None:
+        self._settings.setValue("paths/rar_tool_path", str(path))
 
     def window_geometry(self) -> QByteArray:
         value = self._settings.value("window/geometry", QByteArray())

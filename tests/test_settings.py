@@ -46,3 +46,11 @@ def test_scan_source_folders_round_trip() -> None:
     assert settings.last_mods_folder() == "C:/Mods"
     assert settings.scan_source_folder("natives") == "C:/Game/natives"
     assert settings.selected_scan_source() == "rechunk"
+
+
+def test_rar_tool_path_round_trips() -> None:
+    settings = AppSettings()
+
+    settings.set_rar_tool_path("D:/Tools/WinRAR/rar.exe")
+
+    assert settings.rar_tool_path() == "D:/Tools/WinRAR/rar.exe"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 
 from app.archive_utils import (
     ArchiveReadError,
@@ -13,12 +14,16 @@ from app.archive_utils import (
     read_archive_file,
     write_archive_files,
 )
-from app.parser import parse_color_filename
 from app.settings import CMD_UPDATE_LOG_PATH
 
 
 OLD_CMD_BYTES = bytes.fromhex("61 2A 53 4D")
 NEW_CMD_BYTES = bytes.fromhex("7A 6E C8 66")
+CMD_UPDATE_FILE_RE = re.compile(
+    r"^esf\d{3}_\d{3}_cmd(?:_(?:dx|ex))?_(\d{3})\.user\.2$",
+    re.IGNORECASE,
+)
+CMD_UPDATE_SLOTS = tuple(f"{slot:03d}" for slot in range(0, 11))
 
 
 @dataclass(frozen=True)
@@ -185,7 +190,8 @@ def _update_loose_file(file_path: Path) -> CmdUpdateReport:
 
 
 def _is_color_file_name(path_text: str) -> bool:
-    return parse_color_filename(Path(path_text.replace("\\", "/")).name) is not None
+    match = CMD_UPDATE_FILE_RE.match(Path(path_text.replace("\\", "/")).name)
+    return bool(match and match.group(1) in CMD_UPDATE_SLOTS)
 
 
 @dataclass

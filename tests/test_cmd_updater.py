@@ -8,10 +8,13 @@ import pytest
 from app.archive_utils import (
     ArchiveWriteError,
     can_write_rar,
+    is_rar_write_tool,
     read_archive_file,
+    set_custom_rar_tool_path,
     write_archive_files,
 )
 from app.cmd_updater import NEW_CMD_BYTES, OLD_CMD_BYTES, update_cmds_in_source
+from app.parser import parse_color_filename
 
 
 COLOR_ROOT = "natives/stm/product/model/esf"
@@ -57,6 +60,20 @@ def test_update_cmds_in_selected_folder_patches_loose_cmd_files_recursively(
     assert report.color_files_checked == 1
     assert report.files_updated == 1
     assert color_file.read_bytes() == b"before" + NEW_CMD_BYTES + b"after"
+
+
+def test_update_cmds_patches_slot_000_without_changing_parser_behavior(
+    tmp_path: Path,
+) -> None:
+    color_file = tmp_path / "esf010_002_cmd_000.user.2"
+    color_file.write_bytes(OLD_CMD_BYTES)
+
+    report = update_cmds_in_source(tmp_path)
+
+    assert report.color_files_checked == 1
+    assert report.files_updated == 1
+    assert color_file.read_bytes() == NEW_CMD_BYTES
+    assert parse_color_filename(color_file.name) is None
 
 
 def test_update_cmds_in_zip_patches_supported_color_files(tmp_path: Path) -> None:
@@ -142,6 +159,22 @@ def test_update_cmds_reports_rar_writer_requirement_without_reading_archive(
     assert report.files_updated == 0
     assert len(report.issues) == 1
     assert "WinRAR/RAR" in report.issues[0].message
+
+
+def test_custom_rar_tool_path_enables_rar_writer_detection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rar_tool = tmp_path / "rar.exe"
+    rar_tool.write_bytes(b"")
+    monkeypatch.setattr("app.archive_utils.shutil.which", lambda _name: None)
+    monkeypatch.setattr("app.archive_utils._winrar_install_folders", lambda: [])
+
+    set_custom_rar_tool_path(rar_tool)
+
+    assert is_rar_write_tool(rar_tool)
+    assert can_write_rar()
+    set_custom_rar_tool_path(None)
 
 
 def test_update_cmds_writes_log_file(tmp_path: Path) -> None:
