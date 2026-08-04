@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QMessageBox
 
-from app.characters import CHARACTER_NAMES
+from app.characters import CHARACTER_NAMES, character_label
 from app.models import ScannedMod, SourceColorFile
 from app.settings import APP_VERSION
 from app.scanner import scan_zip
@@ -647,6 +647,10 @@ def test_characters_sort_by_display_name(qt_app: QApplication) -> None:
     ]
 
 
+def test_character_label_includes_esf_id() -> None:
+    assert character_label("esf002") == "Luke (002)"
+
+
 def test_unavailable_source_slot_is_disabled(qt_app: QApplication) -> None:
     window = MainWindow()
     window.slot_column.set_available_slots("normal", set())
@@ -725,7 +729,7 @@ def test_collection_summary_rows_include_assignments(qt_app: QApplication, tmp_p
     table = window._collection_character_table("esf001")
 
     assert len(rows) == len(CHARACTER_NAMES) * 5 * 3 * 10
-    assert ("Ryu", "Costume 1", "Normal", "04", "Source Mod (Slot 2)") in rows
+    assert ("Ryu (001)", "Costume 1", "Normal", "04", "Source Mod (Slot 2)") in rows
     assert table.rowCount() == 30
     assert table.columnCount() == 6
     assert table.item(3, 1).text() == "Source Mod (Slot 2)"
@@ -755,8 +759,12 @@ def test_collection_summary_disables_empty_character_tabs(
     summary = window._build_collection_summary_tabs()
     buttons = summary.character_tab_buttons
     stack = summary.character_stack
-    ryu_index = next(index for index, button in enumerate(buttons) if button.text() == "Ryu")
-    luke_index = next(index for index, button in enumerate(buttons) if button.text() == "Luke")
+    ryu_index = next(
+        index for index, button in enumerate(buttons) if button.text() == "Ryu (001)"
+    )
+    luke_index = next(
+        index for index, button in enumerate(buttons) if button.text() == "Luke (002)"
+    )
 
     assert len(buttons) == len(CHARACTER_NAMES)
     assert buttons[ryu_index].isEnabled()

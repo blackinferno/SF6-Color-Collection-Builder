@@ -1,3 +1,9 @@
+SF6 Color Collection Builder v0.2.4
+
+Recent changes:
+- Added function to update old cmds to be compatible with the Yasmine Update.
+- Character names now show their `esf` ID number.
+
 SF6 Color Collection Builder v0.2.3
 
 Recent changes:

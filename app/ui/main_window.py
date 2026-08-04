@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from app.archive_utils import ArchiveWriteError, is_supported_archive
 from app.auto_updater import can_auto_update, launch_prepared_update, prepare_update
 from app.characters import CHARACTER_NAMES, character_label
+from app.cmd_updater import CmdUpdateReport, update_cmds_in_source
 from app.exporter import can_write_collection_archive, export_collection_archive
 from app.models import CollectionAssignment, ScannedMod
 from app.project_io import load_exported_collection_zip
@@ -79,6 +80,8 @@ class MainWindow(QMainWindow):
         self.update_worker: UpdateCheckWorker | None = None
         self.scan_thread: QThread | None = None
         self.scan_worker: ScanWorker | None = None
+        self.cmd_update_thread: QThread | None = None
+        self.cmd_update_worker: CmdUpdateWorker | None = None
         self.scan_source_key = "mods"
         self.mods_by_source: dict[str, list[ScannedMod]] = {
             key: [] for key, _label in ModList.SOURCES
@@ -185,6 +188,10 @@ class MainWindow(QMainWindow):
         scan_button = QPushButton("Scan")
         scan_button.clicked.connect(self._rescan_current_folder)
         action_toolbar.addWidget(scan_button)
+
+        update_cmds_button = QPushButton("Update CMDs")
+        update_cmds_button.clicked.connect(self._update_cmds_current_folder)
+        action_toolbar.addWidget(update_cmds_button)
 
         left_spacer = QWidget()
         left_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -572,6 +579,38 @@ class MainWindow(QMainWindow):
             return
         self._start_scan_folder(Path(folder), source_key)
 
+    def _update_cmds_current_folder(self) -> None:
+        source_key = self.mod_list.current_source_key
+        folder = self.settings.scan_source_folder(source_key)
+        if not folder or not self._is_valid_scan_path(source_key, Path(folder)):
+            self.statusBar().showMessage(
+                f"Select a {self._scan_source_label(source_key)} source first.",
+                4000,
+            )
+            return
+        if self.scan_thread is not None:
+            self.statusBar().showMessage("Already scanning. Please wait.", 3000)
+            return
+        if self.cmd_update_thread is not None:
+            self.statusBar().showMessage("Already updating CMDs. Please wait.", 3000)
+            return
+
+        path = Path(folder)
+        response = QMessageBox.question(
+            self,
+            "Update CMDs",
+            (
+                "Update supported CMD files in the selected source?\n\n"
+                f"{path}\n\n"
+                "This replaces the old game CMD byte pattern with the current one."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+        self._start_cmd_update(path, source_key)
+
     def _scan_last_mods_folder(self) -> None:
         last_folder = self.settings.scan_source_folder(self.scan_source_key)
         if last_folder and self._is_valid_scan_path(self.scan_source_key, Path(last_folder)):
@@ -597,6 +636,21 @@ class MainWindow(QMainWindow):
         self.scan_thread.finished.connect(self.scan_thread.deleteLater)
         self.scan_thread.finished.connect(self._clear_scan_worker)
         self.scan_thread.start()
+
+    def _start_cmd_update(self, folder: Path, source_key: str) -> None:
+        self.statusBar().showMessage(f"Updating CMDs in {self._scan_source_label(source_key)}...")
+        QApplication.processEvents()
+        self.cmd_update_thread = QThread(self)
+        self.cmd_update_worker = CmdUpdateWorker(folder, source_key)
+        self.cmd_update_worker.moveToThread(self.cmd_update_thread)
+        self.cmd_update_thread.started.connect(self.cmd_update_worker.run)
+        self.cmd_update_worker.succeeded.connect(self._cmd_update_finished)
+        self.cmd_update_worker.failed.connect(self._cmd_update_failed)
+        self.cmd_update_worker.finished.connect(self.cmd_update_thread.quit)
+        self.cmd_update_worker.finished.connect(self.cmd_update_worker.deleteLater)
+        self.cmd_update_thread.finished.connect(self.cmd_update_thread.deleteLater)
+        self.cmd_update_thread.finished.connect(self._clear_cmd_update_worker)
+        self.cmd_update_thread.start()
 
     def _scan_folder(self, folder: Path, source_key: str = "mods") -> None:
         self.statusBar().showMessage(f"Loading {self._scan_source_label(source_key)}...")
@@ -671,6 +725,39 @@ class MainWindow(QMainWindow):
     def _clear_scan_worker(self) -> None:
         self.scan_thread = None
         self.scan_worker = None
+
+    def _cmd_update_finished(
+        self,
+        source_key: str,
+        folder: Path,
+        report: CmdUpdateReport,
+    ) -> None:
+        if report.issues:
+            self.statusBar().showMessage(
+                (
+                    f"Updated {report.files_updated} CMD files. "
+                    f"{len(report.issues)} issues. First: {report.issues[0].display_path}"
+                ),
+                8000,
+            )
+        else:
+            self.statusBar().showMessage(
+                (
+                    f"Updated {report.files_updated} CMD files "
+                    f"out of {report.color_files_checked} supported CMD files."
+                ),
+                6000,
+            )
+
+    def _cmd_update_failed(self, source_key: str, error: str) -> None:
+        self.statusBar().showMessage(
+            f"CMD update failed for {self._scan_source_label(source_key)}: {error}",
+            8000,
+        )
+
+    def _clear_cmd_update_worker(self) -> None:
+        self.cmd_update_thread = None
+        self.cmd_update_worker = None
 
     def _select_scan_source(self, source_key: str) -> None:
         self.scan_source_key = source_key
@@ -1696,6 +1783,26 @@ class ScanWorker(QObject):
                 report = scan_rechunk_source_with_report(self.folder)
             else:
                 report = scan_mods_folder_with_report(self.folder)
+            self.succeeded.emit(self.source_key, self.folder, report)
+        except Exception as error:
+            self.failed.emit(self.source_key, str(error))
+        finally:
+            self.finished.emit()
+
+
+class CmdUpdateWorker(QObject):
+    succeeded = Signal(str, Path, object)
+    failed = Signal(str, str)
+    finished = Signal()
+
+    def __init__(self, folder: Path, source_key: str) -> None:
+        super().__init__()
+        self.folder = folder
+        self.source_key = source_key
+
+    def run(self) -> None:
+        try:
+            report = update_cmds_in_source(self.folder)
             self.succeeded.emit(self.source_key, self.folder, report)
         except Exception as error:
             self.failed.emit(self.source_key, str(error))

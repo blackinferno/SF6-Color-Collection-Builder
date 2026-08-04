@@ -37,4 +37,7 @@ CHARACTER_NAMES = {
 
 
 def character_label(character_id: str) -> str:
-    return CHARACTER_NAMES.get(character_id, character_id)
+    name = CHARACTER_NAMES.get(character_id, character_id)
+    if character_id.lower().startswith("esf") and character_id[3:].isdigit():
+        return f"{name} ({character_id[3:]})"
+    return name

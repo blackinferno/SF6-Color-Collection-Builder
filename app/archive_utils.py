@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+import winreg
 
 import rarfile
 
@@ -36,7 +37,7 @@ def archive_kind(path: Path) -> str:
 
 
 def can_write_rar() -> bool:
-    return shutil.which("rar") is not None or shutil.which("WinRAR") is not None
+    return _rar_write_tool() is not None
 
 
 def list_archive_files(path: str | Path) -> list[str]:
@@ -249,6 +250,11 @@ def _archive_extract_tools() -> list[Path]:
     ):
         if candidate.exists():
             paths.append(candidate)
+    for folder in _winrar_install_folders():
+        for executable_name in ("UnRAR.exe", "WinRAR.exe", "rar.exe"):
+            candidate = folder / executable_name
+            if candidate.exists():
+                paths.append(candidate)
 
     unique_paths: list[Path] = []
     seen: set[str] = set()
@@ -310,7 +316,7 @@ def _temporary_archive_path(path: Path) -> Path:
 
 
 def _write_rar_files(path: Path, files: dict[str, bytes]) -> None:
-    rar_exe = shutil.which("rar") or shutil.which("WinRAR")
+    rar_exe = _rar_write_tool()
     if not rar_exe:
         raise ArchiveWriteError(
             "Saving RAR archives requires WinRAR/RAR command-line tools."
@@ -339,6 +345,66 @@ def _write_rar_files(path: Path, files: dict[str, bytes]) -> None:
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip()
             raise ArchiveWriteError(detail or "RAR command failed.")
+
+
+def _rar_write_tool() -> str | None:
+    for candidate in ("rar", "WinRAR"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    for folder in _winrar_install_folders():
+        for executable_name in ("rar.exe", "WinRAR.exe"):
+            executable = folder / executable_name
+            if executable.exists():
+                return str(executable)
+    return None
+
+
+def _winrar_install_folders() -> list[Path]:
+    folders: list[Path] = []
+    for root, subkey in (
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ):
+        try:
+            with winreg.OpenKey(root, subkey) as parent:
+                for index in range(winreg.QueryInfoKey(parent)[0]):
+                    try:
+                        child_name = winreg.EnumKey(parent, index)
+                        with winreg.OpenKey(parent, child_name) as child:
+                            display_name = str(winreg.QueryValueEx(child, "DisplayName")[0])
+                            if "winrar" not in display_name.lower():
+                                continue
+                            install_location = str(
+                                winreg.QueryValueEx(child, "InstallLocation")[0]
+                            )
+                            if install_location:
+                                folders.append(Path(install_location))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+    for candidate in (
+        Path("C:/Program Files/WinRAR"),
+        Path("C:/Program Files (x86)/WinRAR"),
+        Path("D:/Program Files/WinRAR"),
+        Path("D:/Program Files (x86)/WinRAR"),
+    ):
+        folders.append(candidate)
+
+    unique_folders: list[Path] = []
+    seen: set[str] = set()
+    for folder in folders:
+        key = str(folder).lower()
+        if key not in seen:
+            seen.add(key)
+            unique_folders.append(folder)
+    return unique_folders
 
 
 def _subprocess_creation_flags() -> int:
