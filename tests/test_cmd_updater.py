@@ -7,7 +7,9 @@ import pytest
 
 from app.archive_utils import (
     ArchiveWriteError,
+    can_read_rar,
     can_write_rar,
+    is_rar_read_tool,
     is_rar_write_tool,
     read_archive_file,
     set_custom_rar_tool_path,
@@ -174,6 +176,23 @@ def test_custom_rar_tool_path_enables_rar_writer_detection(
 
     assert is_rar_write_tool(rar_tool)
     assert can_write_rar()
+    set_custom_rar_tool_path(None)
+
+
+def test_custom_unrar_tool_path_enables_rar_reader_but_not_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unrar_tool = tmp_path / "UnRAR.exe"
+    unrar_tool.write_bytes(b"")
+    monkeypatch.setattr("app.archive_utils.shutil.which", lambda _name: None)
+    monkeypatch.setattr("app.archive_utils._winrar_install_folders", lambda: [])
+
+    set_custom_rar_tool_path(unrar_tool)
+
+    assert is_rar_read_tool(unrar_tool)
+    assert can_read_rar()
+    assert not can_write_rar()
     set_custom_rar_tool_path(None)
 
 

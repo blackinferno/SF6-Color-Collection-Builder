@@ -1,3 +1,10 @@
+SF6 Color Collection Builder v0.2.7
+
+Recent changes:
+- Added RAR scan protection so missing RAR tools do not block scanning.
+- Added scan prompt to select a RAR tool, open the WinRAR download page, or skip RAR files.
+- Added archive helper timeouts to prevent stuck external extraction tools from hanging scans.
+
 SF6 Color Collection Builder v0.2.6
 
 Recent changes:

@@ -85,6 +85,32 @@ def test_scan_mods_folder_only_scans_top_level_zips(tmp_path: Path) -> None:
     assert mods[0].source_files[0].source_slot == "010"
 
 
+def test_scan_mods_folder_can_skip_rar_archives(tmp_path: Path) -> None:
+    _write_zip(
+        tmp_path / "Valid.zip",
+        {"modinfo.ini": "name=Valid\n", f"{COLOR_ROOT}/esf002/003/esf002_003_cmd_010.user.2": b"ok"},
+    )
+    (tmp_path / "Problem.rar").write_bytes(b"not actually a rar")
+
+    report = scan_mods_folder_with_report(tmp_path, skip_rar=True)
+
+    assert [mod.mod_name for mod in report.mods] == ["Valid"]
+    assert len(report.issues) == 1
+    assert report.issues[0].package_path.name == "Problem.rar"
+    assert "skipped" in report.issues[0].message.lower()
+
+
+def test_scan_direct_rar_can_be_skipped(tmp_path: Path) -> None:
+    rar_path = tmp_path / "Problem.rar"
+    rar_path.write_bytes(b"not actually a rar")
+
+    report = scan_mods_folder_with_report(rar_path, skip_rar=True)
+
+    assert report.mods == []
+    assert len(report.issues) == 1
+    assert "skipped" in report.issues[0].message.lower()
+
+
 def test_scan_mods_folder_accepts_direct_zip_path(tmp_path: Path) -> None:
     zip_path = tmp_path / "BaseCmds.zip"
     _write_zip(

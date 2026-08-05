@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
 
 from app.archive_utils import (
     ArchiveWriteError,
+    can_read_rar,
     can_write_rar,
+    is_rar_read_tool,
     is_rar_write_tool,
     is_supported_archive,
     set_custom_rar_tool_path,
@@ -630,14 +632,19 @@ class MainWindow(QMainWindow):
     def _scan_current_source_on_startup(self) -> None:
         self._load_source_from_cache_then_scan_once(self.scan_source_key)
 
-    def _start_scan_folder(self, folder: Path, source_key: str) -> None:
+    def _start_scan_folder(self, folder: Path, source_key: str, skip_rar: bool = False) -> None:
         if self.scan_thread is not None:
             self.statusBar().showMessage("Already scanning. Please wait.", 3000)
             return
+        if not skip_rar:
+            rar_scan_action = self._ensure_rar_reader_for_scan(folder)
+            if rar_scan_action == "cancel":
+                return
+            skip_rar = rar_scan_action == "skip"
         self.statusBar().showMessage(f"Loading {self._scan_source_label(source_key)}...")
         QApplication.processEvents()
         self.scan_thread = QThread(self)
-        self.scan_worker = ScanWorker(folder, source_key)
+        self.scan_worker = ScanWorker(folder, source_key, skip_rar)
         self.scan_worker.moveToThread(self.scan_thread)
         self.scan_thread.started.connect(self.scan_worker.run)
         self.scan_worker.succeeded.connect(self._scan_finished)
@@ -672,10 +679,15 @@ class MainWindow(QMainWindow):
             return
         self._apply_scan_report(source_key, folder, report)
 
-    def _scan_source_with_report(self, folder: Path, source_key: str) -> ScanReport:
+    def _scan_source_with_report(
+        self,
+        folder: Path,
+        source_key: str,
+        skip_rar: bool = False,
+    ) -> ScanReport:
         if source_key == "rechunk":
-            return scan_rechunk_source_with_report(folder)
-        return scan_mods_folder_with_report(folder)
+            return scan_rechunk_source_with_report(folder, skip_rar=skip_rar)
+        return scan_mods_folder_with_report(folder, skip_rar=skip_rar)
 
     def _scan_finished(self, source_key: str, folder: Path, report: ScanReport) -> None:
         self._apply_scan_report(source_key, folder, report)
@@ -801,7 +813,10 @@ class MainWindow(QMainWindow):
         if can_write_rar() or not self._source_contains_rar(source):
             return True
 
-        action = self._ask_for_rar_tool_action()
+        action = self._ask_for_rar_tool_action(
+            "RAR archives need rar.exe or WinRAR.exe to be updated.\n\n"
+            "WinRAR was not detected automatically."
+        )
         if action == "download":
             webbrowser.open(WINRAR_DOWNLOAD_URL)
             return False
@@ -830,15 +845,49 @@ class MainWindow(QMainWindow):
         set_custom_rar_tool_path(selected_path)
         return True
 
-    def _ask_for_rar_tool_action(self) -> str:
+    def _ensure_rar_reader_for_scan(self, source: Path) -> str:
+        self._apply_custom_rar_tool_path()
+        if can_read_rar() or not self._source_contains_rar(source):
+            return "scan"
+
+        action = self._ask_for_rar_tool_action(
+            "RAR archives may need UnRAR.exe, WinRAR.exe, or rar.exe to scan reliably.\n\n"
+            "RAR support was not detected automatically."
+        )
+        if action == "download":
+            webbrowser.open(WINRAR_DOWNLOAD_URL)
+            return "cancel"
+        if action == "skip":
+            return "skip"
+        if action != "select":
+            return "cancel"
+
+        selected_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select UnRAR.exe, rar.exe, or WinRAR.exe",
+            self.settings.rar_tool_path(),
+            "RAR Tools (UnRAR.exe rar.exe WinRAR.exe 7z.exe 7za.exe 7zr.exe)",
+        )
+        if not selected_path:
+            return "cancel"
+        if not is_rar_read_tool(selected_path):
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                "Select UnRAR.exe, rar.exe, WinRAR.exe, or a 7-Zip command-line tool.",
+            )
+            return "cancel"
+
+        self.settings.set_rar_tool_path(selected_path)
+        set_custom_rar_tool_path(selected_path)
+        return "scan"
+
+    def _ask_for_rar_tool_action(self, message: str) -> str:
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Warning)
         dialog.setWindowTitle("WinRAR Needed")
-        dialog.setText(
-            "RAR archives need rar.exe or WinRAR.exe to be updated.\n\n"
-            "WinRAR was not detected automatically."
-        )
-        select_button = dialog.addButton("Select WinRAR", QMessageBox.AcceptRole)
+        dialog.setText(message)
+        select_button = dialog.addButton("Select Tool", QMessageBox.AcceptRole)
         download_button = dialog.addButton("Open WinRAR Download", QMessageBox.ActionRole)
         skip_button = dialog.addButton("Skip RAR", QMessageBox.RejectRole)
         dialog.setDefaultButton(select_button)
@@ -1876,17 +1925,18 @@ class ScanWorker(QObject):
     failed = Signal(str, str)
     finished = Signal()
 
-    def __init__(self, folder: Path, source_key: str) -> None:
+    def __init__(self, folder: Path, source_key: str, skip_rar: bool = False) -> None:
         super().__init__()
         self.folder = folder
         self.source_key = source_key
+        self.skip_rar = skip_rar
 
     def run(self) -> None:
         try:
             if self.source_key == "rechunk":
-                report = scan_rechunk_source_with_report(self.folder)
+                report = scan_rechunk_source_with_report(self.folder, skip_rar=self.skip_rar)
             else:
-                report = scan_mods_folder_with_report(self.folder)
+                report = scan_mods_folder_with_report(self.folder, skip_rar=self.skip_rar)
             self.succeeded.emit(self.source_key, self.folder, report)
         except Exception as error:
             self.failed.emit(self.source_key, str(error))

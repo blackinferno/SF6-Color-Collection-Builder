@@ -49,9 +49,16 @@ def scan_mods_folder(folder: str | Path) -> list[ScannedMod]:
     return scan_mods_folder_with_report(folder).mods
 
 
-def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
+def scan_rechunk_source_with_report(source: str | Path, skip_rar: bool = False) -> ScanReport:
     """Fast scan for base CMD sources under natives/stm/product/model/esf only."""
     root = Path(source)
+    if skip_rar and root.suffix.lower() == ".rar":
+        report = ScanReport(
+            [],
+            [ScanIssue(root, None, "RAR archive skipped because RAR support is not configured.")],
+        )
+        write_scan_log(root, report)
+        return report
     if is_supported_archive(root):
         try:
             mods, issues = _scan_rechunk_archive(root)
@@ -75,9 +82,16 @@ def scan_rechunk_source_with_report(source: str | Path) -> ScanReport:
     return report
 
 
-def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
+def scan_mods_folder_with_report(folder: str | Path, skip_rar: bool = False) -> ScanReport:
     """Scan a zip, top-level mod packages, or a selected SF6 data folder."""
     root = Path(folder)
+    if skip_rar and root.suffix.lower() == ".rar":
+        report = ScanReport(
+            [],
+            [ScanIssue(root, None, "RAR archive skipped because RAR support is not configured.")],
+        )
+        write_scan_log(root, report)
+        return report
     if is_supported_archive(root):
         try:
             mods, issues = scan_archive_mods_with_issues(root)
@@ -107,6 +121,15 @@ def scan_mods_folder_with_report(folder: str | Path) -> ScanReport:
 
     for package_path in sorted(root.iterdir(), key=lambda path: path.name.lower()):
         if is_supported_archive(package_path):
+            if skip_rar and package_path.suffix.lower() == ".rar":
+                issues.append(
+                    ScanIssue(
+                        package_path,
+                        None,
+                        "RAR archive skipped because RAR support is not configured.",
+                    )
+                )
+                continue
             try:
                 package_mods, package_issues = scan_archive_mods_with_issues(package_path)
             except ArchiveReadError as error:

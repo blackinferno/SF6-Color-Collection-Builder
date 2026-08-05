@@ -35,6 +35,7 @@ You do not need Python unless you want to run or modify the source code.
 - Write scan warnings to `scan.log` beside the executable.
 - Function to batch update/fix old CMDs, including `cmd_000.user.2`, to be compatible with the Yasmine Update.
 - Prompt for WinRAR or open the official WinRAR download page when RAR update support is missing.
+- Prompt for RAR scan support or skip RAR files when RAR tools are missing.
 - Write CMD update reports to `cmd_update.log` beside the executable.
 - Show character `esf` ID numbers beside character names.
 

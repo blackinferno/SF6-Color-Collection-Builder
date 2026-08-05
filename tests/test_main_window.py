@@ -383,7 +383,7 @@ def test_scan_folder_reports_scan_issues_in_status(
 
     monkeypatch.setattr(
         "app.ui.main_window.scan_mods_folder_with_report",
-        lambda _folder: ScanReport([], [issue]),
+        lambda _folder, skip_rar=False: ScanReport([], [issue]),
     )
 
     window._scan_folder(tmp_path, "mods")
@@ -462,7 +462,7 @@ def test_cmd_update_prompts_for_rar_tool_when_needed(
     rar_tool.write_bytes(b"")
 
     monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
-    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "select")
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "select")
     monkeypatch.setattr(
         QFileDialog,
         "getOpenFileName",
@@ -484,7 +484,7 @@ def test_cmd_update_can_open_winrar_download_when_rar_tool_is_missing(
     opened_urls: list[str] = []
 
     monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
-    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "download")
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "download")
     monkeypatch.setattr(
         "app.ui.main_window.webbrowser.open",
         lambda url: opened_urls.append(url),
@@ -504,7 +504,7 @@ def test_cmd_update_can_skip_rar_when_rar_tool_is_missing(
     rar_path.write_bytes(b"rar")
 
     monkeypatch.setattr("app.ui.main_window.can_write_rar", lambda: False)
-    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda: "skip")
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "skip")
 
     assert window._ensure_rar_writer_for_cmd_update(tmp_path)
 
@@ -527,6 +527,62 @@ def test_cmd_update_does_not_prompt_for_rar_tool_without_rars(
 
     assert window._ensure_rar_writer_for_cmd_update(tmp_path)
     assert calls == []
+
+
+def test_scan_prompts_for_rar_reader_when_needed(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    (tmp_path / "Mod.rar").write_bytes(b"rar")
+    unrar_tool = tmp_path / "UnRAR.exe"
+    unrar_tool.write_bytes(b"")
+
+    monkeypatch.setattr("app.ui.main_window.can_read_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "select")
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(unrar_tool), ""),
+    )
+
+    assert window._ensure_rar_reader_for_scan(tmp_path) == "scan"
+    assert window.settings.rar_tool_path() == str(unrar_tool)
+
+
+def test_scan_can_open_winrar_download_when_rar_reader_is_missing(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    (tmp_path / "Mod.rar").write_bytes(b"rar")
+    opened_urls: list[str] = []
+
+    monkeypatch.setattr("app.ui.main_window.can_read_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "download")
+    monkeypatch.setattr(
+        "app.ui.main_window.webbrowser.open",
+        lambda url: opened_urls.append(url),
+    )
+
+    assert window._ensure_rar_reader_for_scan(tmp_path) == "cancel"
+    assert opened_urls == ["https://www.win-rar.com/download.html"]
+
+
+def test_scan_can_skip_rar_when_rar_reader_is_missing(
+    qt_app: QApplication,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow()
+    (tmp_path / "Mod.rar").write_bytes(b"rar")
+
+    monkeypatch.setattr("app.ui.main_window.can_read_rar", lambda: False)
+    monkeypatch.setattr(window, "_ask_for_rar_tool_action", lambda _message: "skip")
+
+    assert window._ensure_rar_reader_for_scan(tmp_path) == "skip"
 
 
 def test_natives_and_rechunk_scan_results_auto_select_first_mod(

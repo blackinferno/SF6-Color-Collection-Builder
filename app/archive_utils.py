@@ -11,6 +11,7 @@ import rarfile
 
 
 SUPPORTED_ARCHIVE_SUFFIXES = {".zip", ".7z", ".rar"}
+ARCHIVE_TOOL_TIMEOUT_SECONDS = 120
 _CUSTOM_RAR_TOOL_PATH: Path | None = None
 
 
@@ -41,10 +42,18 @@ def can_write_rar() -> bool:
     return _rar_write_tool() is not None
 
 
+def can_read_rar() -> bool:
+    return _rar_read_tool() is not None
+
+
 def set_custom_rar_tool_path(path: str | Path | None) -> None:
     global _CUSTOM_RAR_TOOL_PATH
     candidate = Path(path) if path else None
-    _CUSTOM_RAR_TOOL_PATH = candidate if candidate and _is_rar_write_tool(candidate) else None
+    _CUSTOM_RAR_TOOL_PATH = candidate if candidate and _is_rar_read_tool(candidate) else None
+
+
+def is_rar_read_tool(path: str | Path) -> bool:
+    return _is_rar_read_tool(Path(path))
 
 
 def is_rar_write_tool(path: str | Path) -> bool:
@@ -141,7 +150,7 @@ def write_archive_files(path: str | Path, files: dict[str, bytes]) -> None:
             finally:
                 temp_path.unlink(missing_ok=True)
             return
-    except (OSError, zipfile.BadZipFile, rarfile.Error) as error:
+    except (OSError, subprocess.SubprocessError, zipfile.BadZipFile, rarfile.Error) as error:
         raise ArchiveWriteError(str(error)) from error
     raise ArchiveWriteError(f"Unsupported archive type: {archive_path.suffix}")
 
@@ -171,6 +180,7 @@ def _list_7z_member_names(path: Path) -> list[str]:
         capture_output=True,
         check=False,
         creationflags=_subprocess_creation_flags(),
+        timeout=ARCHIVE_TOOL_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -205,12 +215,19 @@ def _resolve_archive_member_name(names: list[str], requested_name: str) -> str:
 def _read_file_with_archive_tool(path: Path, internal_path: str) -> bytes:
     attempts: list[str] = []
     for command in _archive_tool_commands(path, internal_path):
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            check=False,
-            creationflags=_subprocess_creation_flags(),
-        )
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                creationflags=_subprocess_creation_flags(),
+                timeout=ARCHIVE_TOOL_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            attempts.append(
+                f"{Path(command[0]).name} timed out after {ARCHIVE_TOOL_TIMEOUT_SECONDS} seconds"
+            )
+            continue
         if result.returncode == 0:
             return result.stdout
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -246,6 +263,8 @@ def _archive_extract_tools() -> list[Path]:
         "rar",
     ]
     paths: list[Path] = []
+    if _CUSTOM_RAR_TOOL_PATH and _is_rar_read_tool(_CUSTOM_RAR_TOOL_PATH):
+        paths.append(_CUSTOM_RAR_TOOL_PATH)
     for candidate in candidates:
         resolved = shutil.which(candidate)
         if resolved:
@@ -301,6 +320,7 @@ def _write_7z_files(path: Path, files: dict[str, bytes]) -> None:
             capture_output=True,
             check=False,
             creationflags=_subprocess_creation_flags(),
+            timeout=ARCHIVE_TOOL_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -352,6 +372,7 @@ def _write_rar_files(path: Path, files: dict[str, bytes]) -> None:
             text=True,
             check=False,
             creationflags=_subprocess_creation_flags(),
+            timeout=ARCHIVE_TOOL_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip()
@@ -371,6 +392,39 @@ def _rar_write_tool() -> str | None:
             if executable.exists():
                 return str(executable)
     return None
+
+
+def _rar_read_tool() -> str | None:
+    if _CUSTOM_RAR_TOOL_PATH and _is_rar_read_tool(_CUSTOM_RAR_TOOL_PATH):
+        return str(_CUSTOM_RAR_TOOL_PATH)
+    for executable in _archive_extract_tools():
+        if executable.name.lower() in {
+            "unrar.exe",
+            "rar.exe",
+            "winrar.exe",
+            "unrar",
+            "rar",
+            "winrar",
+            "7z.exe",
+            "7za.exe",
+            "7zr.exe",
+            "7z",
+            "7za",
+            "7zr",
+        }:
+            return str(executable)
+    return None
+
+
+def _is_rar_read_tool(path: Path) -> bool:
+    return path.is_file() and path.name.lower() in {
+        "unrar.exe",
+        "rar.exe",
+        "winrar.exe",
+        "7z.exe",
+        "7za.exe",
+        "7zr.exe",
+    }
 
 
 def _is_rar_write_tool(path: Path) -> bool:
