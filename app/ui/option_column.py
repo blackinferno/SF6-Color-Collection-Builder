@@ -119,7 +119,8 @@ class OptionColumn(QWidget):
                 item.setSelected(True)
 
         self.table_widget.resizeColumnsToContents()
-        self.table_widget.resizeRowsToContents()
+        for row in range(self.table_widget.rowCount()):
+            self.table_widget.setRowHeight(row, 30)
 
     def _emit_list_selected(self, item: QListWidgetItem) -> None:
         if item.flags() & Qt.ItemIsEnabled:
